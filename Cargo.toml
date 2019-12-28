@@ -1,0 +1,19 @@
+[package]
+name = "ektoboat"
+version = "0.1.0"
+authors = ["Martin Milata <martin@martinmilata.cz>"]
+description = "a boat for carrying music"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# arg parser
+clap = "~2.33.0"
+
+# logging
+stderrlog = "0.4.3"
+log = "0.4.8"
+
+# youtube
+google-youtube3 = "1.0.10"
