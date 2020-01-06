@@ -1,18 +1,17 @@
-#[macro_use]
-extern crate clap;
-#[macro_use]
 extern crate log;
 extern crate stderrlog;
 
-use clap::{App, Arg};
+//use std::error::Error;
+use std::process;
 
-fn init_logging(matches: &clap::ArgMatches) {
-    let verbose = matches.occurrences_of("verbose") as usize;
+use ektoboat::{run, Config};
+
+fn init_logging(config: &Config) {
     stderrlog::new()
         // To enable logging from extra crates just add another call to module() with the name of the crate.
         .module(module_path!())
         // .quiet(quiet)
-        .verbosity(1 + verbose)
+        .verbosity(1 + config.verbose)
         .timestamp(stderrlog::Timestamp::Off)
         .color(stderrlog::ColorChoice::Never)
         .init()
@@ -20,34 +19,12 @@ fn init_logging(matches: &clap::ArgMatches) {
 }
 
 fn main() {
-    // TODO struct?
-    // TODO generate completion
-    let matches = App::new(crate_name!())
-        .about(crate_description!())
-        .version(crate_version!())
-        .setting(clap::AppSettings::VersionlessSubcommands)
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
-                .help("Increases message verbosity"))
-        .subcommand(
-            App::new("youtube")
-                .about("upload to youtube")
-                .setting(clap::AppSettings::DisableVersion)
-                .arg(
-                    Arg::with_name("input_file")
-                        .help("input file")
-                        // .default_value("input.avi")
-                        .index(1)
-                        .required(true)
-                ))
-        .get_matches();
+    let config = Config::from_cmdline();
 
-    init_logging(&matches);
+    init_logging(&config);
 
-    debug!("{} {}", crate_name!(), crate_version!());
-    warn!("warn message");
-    error!("error message");
-    println!("Hello, world!");
+    if let Err(e) = run(config) {
+        log::error!("Error: {}", e);
+        process::exit(1);
+    }
 }
