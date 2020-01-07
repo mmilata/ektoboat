@@ -7,6 +7,7 @@ use crate::youtube;
 pub enum Action {
     Help,
     YTUpload(youtube::Video),
+    YTPlaylist(youtube::Playlist),
 }
 
 pub struct Config {
@@ -41,8 +42,8 @@ impl Config {
                     .help("State directory"),
             )
             .subcommand(
-                App::new("youtube")
-                    .about("upload to youtube")
+                App::new("yt-upload")
+                    .about("upload to YouTube")
                     .setting(clap::AppSettings::DisableVersion)
                     .arg(
                         Arg::with_name("title")
@@ -62,8 +63,35 @@ impl Config {
                     .arg(
                         Arg::with_name("input_file")
                             .help("input file")
-                            //.default_value("input.avi")
+                            .value_name("FILE")
                             .index(1)
+                            .required(true),
+                    ),
+            )
+            .subcommand(
+                App::new("yt-playlist")
+                    .about("create YouTube playlist")
+                    .setting(clap::AppSettings::DisableVersion)
+                    .arg(
+                        Arg::with_name("title")
+                            .long("title")
+                            .takes_value(true)
+                            .help("Title of the video")
+                            .required(true),
+                    )
+                    .arg(
+                        Arg::with_name("description")
+                            .long("description")
+                            .takes_value(true)
+                            .value_name("FILE")
+                            .help("File containing video description")
+                            .default_value("/dev/null"),
+                    )
+                    .arg(
+                        Arg::with_name("video_ids")
+                            .help("IDs of videos in the playlist")
+                            .index(1)
+                            .multiple(true)
                             .required(true),
                     ),
             )
@@ -77,12 +105,30 @@ impl Config {
             config.appdir = PathBuf::from(matches.value_of("statedir").unwrap());
         }
 
-        if let Some(ref youtube_matches) = matches.subcommand_matches("youtube") {
+        if let Some(ref youtube_matches) = matches.subcommand_matches("yt-upload") {
             config.action = Action::YTUpload(youtube::Video {
                 title: youtube_matches.value_of("title").unwrap().to_string(),
-                description: std::fs::read_to_string(youtube_matches.value_of("description").unwrap()).expect("read description"),
+                description: std::fs::read_to_string(
+                    youtube_matches.value_of("description").unwrap(),
+                )
+                .expect("read description"),
                 tags: std::vec::Vec::new(),
                 filename: PathBuf::from(youtube_matches.value_of("input_file").unwrap()),
+            });
+        }
+        if let Some(ref playlist_matches) = matches.subcommand_matches("yt-playlist") {
+            config.action = Action::YTPlaylist(youtube::Playlist {
+                title: playlist_matches.value_of("title").unwrap().to_string(),
+                description: std::fs::read_to_string(
+                    playlist_matches.value_of("description").unwrap(),
+                )
+                .expect("read description"),
+                tags: std::vec::Vec::new(),
+                videos: playlist_matches
+                    .values_of("video_ids")
+                    .unwrap()
+                    .map(|s| youtube::VideoID(s.to_string()))
+                    .collect(),
             });
         }
 
@@ -116,18 +162,30 @@ impl Default for Config {
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let yt = || {
+        youtube::YT::new(
+            config.client_secret().as_path(),
+            config.filename("youtube_token.json").as_path(),
+        )
+    };
     match &config.action {
         Action::Help => {
-            return Err(Box::new(youtube::YTError::new(
+            // FIXME use different error type
+            return Err(Box::new(youtube::Error::new(
                 "You have to specify an action, use --help for help".to_string(),
             )));
         }
         Action::YTUpload(video) => {
-            let yt = youtube::YT::new(
-                config.client_secret().as_path(),
-                config.filename("youtube_token.json").as_path(),
-            )?;
-            println!("{}", yt.upload_video(video.clone())?);
+            println!("{}", yt()?.upload_video(video.clone())?.as_url());
+        }
+        Action::YTPlaylist(playlist) => {
+            let yt = yt()?;
+            let playlist_id = yt.create_playlist(playlist.clone())?;
+            println!("{}", playlist_id.as_url());
+            for video_id in &playlist.videos {
+                yt.add_video_to_playlist(playlist_id.clone(), video_id.clone())?;
+                log::debug!("done");
+            }
         }
     }
 
