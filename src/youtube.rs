@@ -1,8 +1,8 @@
-extern crate google_youtube3 as youtube3;
-extern crate hyper;
-extern crate hyper_rustls;
-//extern crate yup_hyper_mock as hyper_mock;
-extern crate yup_oauth2 as oauth2;
+use google_youtube3 as youtube3;
+use hyper;
+use hyper_rustls;
+use yup_oauth2 as oauth2;
+//use yup_hyper_mock as hyper_mock;
 
 use oauth2::{ApplicationSecret, Authenticator, AuthenticatorDelegate, DiskTokenStorage};
 use std::error;

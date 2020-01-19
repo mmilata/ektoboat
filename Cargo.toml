@@ -27,4 +27,11 @@ serde_json = "^1.0"
 yup-oauth2 = "^1.0"
 # yup-hyper-mock = "2.0.0"
 
+# used by tests in model.rs
 tempfile = "^3.1.0"
+
+# for scraping ektoplazm.com
+select = "^0.4.3" #137 deps total
+
+zip = "^0.5.4"
+id3 = "^0.3.0"

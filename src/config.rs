@@ -2,12 +2,15 @@ use clap::{App, Arg};
 use std::error::Error;
 use std::path::PathBuf;
 
+use crate::model;
+use crate::source;
 use crate::youtube;
 
 pub enum Action {
     Help,
     YTUpload(youtube::Video),
     YTPlaylist(youtube::Playlist),
+    Fetch(String),
 }
 
 pub struct Config {
@@ -95,6 +98,17 @@ impl Config {
                             .required(true),
                     ),
             )
+            .subcommand(
+                App::new("fetch")
+                    .about("download MP3 archive as well as metadata")
+                    .setting(clap::AppSettings::DisableVersion)
+                    .arg(
+                        Arg::with_name("url")
+                            .help("URL of the album")
+                            .index(1)
+                            .required(true),
+                    ),
+            )
             .get_matches();
 
         //debug!("{} {}", crate_name!(), crate_version!());
@@ -131,20 +145,31 @@ impl Config {
                     .collect(),
             });
         }
+        if let Some(ref fetch_matches) = matches.subcommand_matches("fetch") {
+            config.action = Action::Fetch(fetch_matches.value_of("url").unwrap().to_string());
+        }
 
         config
     }
 
-    pub fn client_secret(&self) -> PathBuf {
-        let mut p = self.appdir.clone();
-        p.push("client_secret.json");
-        p
-    }
-
-    pub fn filename(self: &Config, basename: &str) -> PathBuf {
+    fn filename(self: &Config, basename: &str) -> PathBuf {
         let mut p = self.appdir.clone();
         p.push(basename);
         p
+    }
+
+    pub fn client_secret(&self) -> PathBuf {
+        self.filename("client_secret.json")
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.filename("state.json")
+    }
+
+    pub fn mp3_dir(&self) -> PathBuf {
+        // TODO ~/.cache/ektoboat/mp3
+        // TODO create if not exists
+        self.filename("mp3")
     }
 }
 
@@ -187,17 +212,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
                 log::debug!("done");
             }
         }
+        Action::Fetch(url) => {
+            let store = model::Store::new(config.db_path());
+            let album = source::fetch(url, &config.mp3_dir())?;
+            store.save(&album)?;
+        }
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_name() {
-        ()
-    }
 }
