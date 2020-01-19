@@ -1,7 +1,7 @@
+use crate::util;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
@@ -74,7 +74,7 @@ impl Store {
         Store { filename: path }
     }
 
-    pub fn get_album(&self, id: &str) -> Result<Option<Album>, Box<dyn Error>> {
+    pub fn get_album(&self, id: &str) -> Result<Option<Album>, util::Error> {
         let db = self.read_db()?;
         let ov = db.get(id);
 
@@ -88,7 +88,7 @@ impl Store {
         }
     }
 
-    pub fn save(&self, album: &Album) -> Result<(), Box<dyn Error>> {
+    pub fn save(&self, album: &Album) -> Result<(), util::Error> {
         let mut db = self.read_db()?;
         db.insert(album.url.clone(), album.clone());
         self.write_db(db)?;
@@ -142,11 +142,11 @@ mod tests {
     use tempfile;
 
     #[test]
-    fn simple_roundtrip() -> Result<(), Box<dyn Error>> {
-        let mut tmp = tempfile::NamedTempFile::new()?;
-        tmp.write(b"{}")?;
+    fn simple_roundtrip() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write(b"{}").unwrap();
         let tmppath = tmp.path();
-        //let (tmp, tmppath) = tmp.keep()?;
+        //let (tmp, tmppath) = tmp.keep().unwrap();
         let store = Store::new(tmppath.to_path_buf());
         println!("store path: {:?}", tmppath);
 
@@ -165,10 +165,10 @@ mod tests {
                 mp3_file: None,
             }],
         };
-        store.save(&album)?;
-        let a =
-            store.get_album("https://ektoplazm.com/free-music/globular-entangled-everything")?;
+        store.save(&album).unwrap();
+        let a = store
+            .get_album("https://ektoplazm.com/free-music/globular-entangled-everything")
+            .unwrap();
         assert_eq!(Some(album), a);
-        Ok(())
     }
 }

@@ -147,6 +147,7 @@ fn read_id3(dir: &Path) -> Result<(String, Option<String>, Option<u16>, Vec<Trac
 }
 
 fn download(url: &str) -> Result<hyper::client::response::Response, util::Error> {
+    log::debug!("GET {}", url);
     let client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
         hyper_rustls::TlsClient::new(),
     ));
@@ -162,7 +163,7 @@ fn download(url: &str) -> Result<hyper::client::response::Response, util::Error>
         //log::debug!("{:?}\n{:?}", res, std::str::from_utf8(&body).unwrap());
         return Err(util::Error::new("Failed to fetch URL"));
     }
-    log::info!("Success!");
+    log::debug!("Got status {}", res.status);
 
     Ok(res)
 }
@@ -356,7 +357,6 @@ mod tests {
                 },
             ]
         );
-
 
         let a = Album {
             url: "".to_string(),

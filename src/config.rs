@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::model;
 use crate::source;
+use crate::util;
 use crate::youtube;
 
 pub enum Action {
@@ -41,7 +42,6 @@ impl Config {
                 Arg::with_name("statedir")
                     .short("d")
                     .takes_value(true)
-                    //.default_value(config.appdir.to_str().unwrap())
                     .help("State directory"),
             )
             .subcommand(
@@ -186,7 +186,7 @@ impl Default for Config {
     }
 }
 
-pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+pub fn run(config: Config) -> Result<(), util::Error> {
     let yt = || {
         youtube::YT::new(
             config.client_secret().as_path(),
@@ -196,9 +196,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     match &config.action {
         Action::Help => {
             // FIXME use different error type
-            return Err(Box::new(youtube::Error::new(
-                "You have to specify an action, use --help for help".to_string(),
-            )));
+            return Err(util::Error::new(
+                "You have to specify an action, use --help for help",
+            ));
         }
         Action::YTUpload(video) => {
             println!("{}", yt()?.upload_video(video.clone())?.as_url());

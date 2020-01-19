@@ -1,42 +1,17 @@
-use google_youtube3 as youtube3;
-use hyper;
-use hyper_rustls;
-use yup_oauth2 as oauth2;
-//use yup_hyper_mock as hyper_mock;
-
-use oauth2::{ApplicationSecret, Authenticator, AuthenticatorDelegate, DiskTokenStorage};
+use crate::util;
 use std::error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::vec::Vec;
+
+use google_youtube3 as youtube3;
+use hyper;
+use hyper_rustls;
+use yup_oauth2 as oauth2;
+use yup_oauth2::{ApplicationSecret, Authenticator, AuthenticatorDelegate, DiskTokenStorage};
+//use yup_hyper_mock as hyper_mock;
 use youtube3::YouTube;
-
-//FIXME: enum w/ timeout?
-#[derive(Debug)]
-pub struct Error {
-    msg: String,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-}
-
-impl Error {
-    pub fn new(msg: String) -> Error {
-        Error {
-            msg: msg.to_string(),
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct VideoID(pub String);
@@ -94,10 +69,7 @@ pub struct YT {
 
 // scope is probably https://www.googleapis.com/auth/youtube.upload
 impl YT {
-    pub fn new(
-        client_secret_path: &Path,
-        token_storage_path: &Path,
-    ) -> Result<YT, Box<dyn error::Error>> {
+    pub fn new(client_secret_path: &Path, token_storage_path: &Path) -> Result<YT, util::Error> {
         let client = || {
             hyper::Client::with_connector(hyper::net::HttpsConnector::new(
                 hyper_rustls::TlsClient::new(),
@@ -112,7 +84,7 @@ impl YT {
         let secret: ApplicationSecret = oauth2::read_application_secret(client_secret_path)
             .map_err(|e| {
                 log::error!("Looks like client_secret.json is missing. Please go to https://console.developers.google.com/apis/credentials, create OAuth Client ID, and save the credentials to {}", client_secret_path.display());
-                Error::new(format!("{}: {}", client_secret_path.display(), e))
+                util::Error::new(&format!("{}: {}", client_secret_path.display(), e))
             })?;
         //FIXME ewww
         let token_storage =
@@ -131,7 +103,7 @@ impl YT {
         Ok(YT { hub: hub })
     }
 
-    pub fn upload_video(&self, video: Video) -> Result<VideoID, Box<dyn error::Error>> {
+    pub fn upload_video(&self, video: Video) -> Result<VideoID, util::Error> {
         let mut v = youtube3::Video::default();
         v.snippet = Some(youtube3::VideoSnippet {
             title: Some(video.title),
@@ -154,43 +126,21 @@ impl YT {
             .insert(v)
             .upload_resumable(f, "application/octet-stream".parse().unwrap());
 
-        let inserted_video = match result {
-            Err(e) => match e {
-                // The Error enum provides details about what exactly happened.
-                // You can also just use its `Debug`, `Display` or `Error` traits
-                youtube3::Error::HttpError(_)
-                | youtube3::Error::MissingAPIKey
-                | youtube3::Error::MissingToken(_)
-                | youtube3::Error::Cancelled
-                | youtube3::Error::UploadSizeLimitExceeded(_, _)
-                | youtube3::Error::Failure(_)
-                | youtube3::Error::BadRequest(_)
-                | youtube3::Error::FieldClash(_)
-                | youtube3::Error::JsonDecodeError(_, _) => {
-                    log::error!("Youtube error: {}", e);
-                    return Err(Box::new(e));
-                }
-            },
-            Ok((res, vid)) => {
-                log::debug!("success: {:?}", res);
-                log::debug!("result: {:?}", vid);
-                vid
-            }
-        };
+        // The Error enum provides details about what exactly happened.
+        // You can also just use its `Debug`, `Display` or `Error` traits
+        let (res, inserted_video) = result?;
+        log::debug!("Video upload success: {:?}", res);
+        log::debug!("Result: {:?}", inserted_video);
 
         let video_id = match inserted_video.id {
-            None => {
-                return Err(Box::new(Error::new(
-                    "API did not return video id".to_string(),
-                )))
-            }
+            None => return Err(util::Error::new("API did not return video id")),
             Some(s) => s,
         };
 
         Ok(VideoID(video_id))
     }
 
-    pub fn create_playlist(&self, playlist: Playlist) -> Result<PlaylistID, Box<dyn error::Error>> {
+    pub fn create_playlist(&self, playlist: Playlist) -> Result<PlaylistID, util::Error> {
         let mut p = youtube3::Playlist::default();
 
         let mut pstatus = youtube3::PlaylistStatus::default();
@@ -205,23 +155,13 @@ impl YT {
 
         let result = self.hub.playlists().insert(p).doit();
 
-        let inserted_playlist = match result {
-            Err(e) => {
-                log::error!("Youtube error: {}", e);
-                return Err(Box::new(e));
-            }
-            Ok((res, pl)) => {
-                log::debug!("success: {:?}", res);
-                log::debug!("result: {:?}", pl);
-                pl
-            }
-        };
+        let (res, inserted_playlist) = result?;
+        log::debug!("Success: {:?}", res);
+        log::debug!("Result: {:?}", inserted_playlist);
 
         match inserted_playlist.id {
             None => {
-                return Err(Box::new(Error::new(
-                    "API did not return playlist id".to_string(),
-                )))
+                return Err(util::Error::new("API did not return playlist id"));
             }
             Some(s) => Ok(PlaylistID(s)),
         }
@@ -231,7 +171,7 @@ impl YT {
         &self,
         playlist_id: PlaylistID,
         video_id: VideoID,
-    ) -> Result<(), Box<dyn error::Error>> {
+    ) -> Result<(), util::Error> {
         log::info!("Adding to playlist");
         let mut pi = youtube3::PlaylistItem::default();
 
@@ -246,18 +186,11 @@ impl YT {
         pi.snippet = Some(psnippet);
 
         let result = self.hub.playlist_items().insert(pi).doit();
+        let (res, pi) = result?;
 
-        match result {
-            Err(e) => {
-                log::error!("Youtube error: {}", e);
-                return Err(Box::new(e));
-            }
-            Ok((res, pi)) => {
-                log::debug!("success: {:?}", res);
-                log::debug!("result: {:?}", pi);
-                Ok(())
-            }
-        }
+        log::debug!("Success: {:?}", res);
+        log::debug!("Result: {:?}", pi);
+        Ok(())
     }
 }
 

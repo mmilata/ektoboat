@@ -71,4 +71,13 @@ impl From<id3::Error> for Error {
     }
 }
 
+impl From<google_youtube3::Error> for Error {
+    fn from(err: google_youtube3::Error) -> Self {
+        Error {
+            msg: format!("YouTube error: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
