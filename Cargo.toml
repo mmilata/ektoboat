@@ -35,3 +35,6 @@ select = "^0.4.3" #137 deps total
 
 zip = "^0.5.4"
 id3 = "^0.3.0"
+
+regex = "1"
+lazy_static = "1"

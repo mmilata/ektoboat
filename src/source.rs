@@ -7,8 +7,8 @@ use std::vec::Vec;
 
 use hyper;
 use hyper_rustls;
-use log;
 use id3;
+use log;
 use select::document::Document;
 use select::predicate::{Class, Name, Predicate};
 use tempfile;

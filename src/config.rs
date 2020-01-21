@@ -1,10 +1,11 @@
 use clap::{App, Arg};
-use std::error::Error;
-use std::path::PathBuf;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
 
 use crate::model;
 use crate::source;
 use crate::util;
+use crate::video;
 use crate::youtube;
 
 pub enum Action {
@@ -12,6 +13,11 @@ pub enum Action {
     YTUpload(youtube::Video),
     YTPlaylist(youtube::Playlist),
     Fetch(String),
+    Video {
+        input: PathBuf,
+        image: PathBuf,
+        output: PathBuf,
+    },
 }
 
 pub struct Config {
@@ -109,9 +115,32 @@ impl Config {
                             .required(true),
                     ),
             )
+            .subcommand(
+                App::new("video")
+                    .about("convert MP3 file to video with still image")
+                    .setting(clap::AppSettings::DisableVersion)
+                    .arg(
+                        Arg::with_name("out")
+                            .long("out")
+                            .takes_value(true)
+                            .value_name("FILE")
+                            .help("File name of the result"),
+                    )
+                    .arg(
+                        Arg::with_name("audio_file")
+                            .help("input file")
+                            .index(1)
+                            .required(true)
+                            .help("Audio file for the video"),
+                    )
+                    .arg(
+                        Arg::with_name("image_file")
+                            .index(2)
+                            .required(true)
+                            .help("Image to be used for video (aka album cover)"),
+                    ),
+            )
             .get_matches();
-
-        //debug!("{} {}", crate_name!(), crate_version!());
 
         config.verbose = matches.occurrences_of("verbose") as usize;
 
@@ -148,12 +177,37 @@ impl Config {
         if let Some(ref fetch_matches) = matches.subcommand_matches("fetch") {
             config.action = Action::Fetch(fetch_matches.value_of("url").unwrap().to_string());
         }
+        if let Some(ref video_matches) = matches.subcommand_matches("video") {
+            let infile = PathBuf::from(video_matches.value_of("audio_file").unwrap());
+            let outfile = match video_matches.value_of("out") {
+                Some(o) => PathBuf::from(o),
+                None => {
+                    let mut p = PathBuf::from(std::env::current_dir().unwrap());
+                    p.push(infile.file_name().expect("audio file name"));
+                    p.set_extension("avi");
+                    p
+                }
+            };
+            config.action = Action::Video {
+                input: infile,
+                output: outfile,
+                image: PathBuf::from(video_matches.value_of("image_file").unwrap()),
+            };
+        }
 
         config
     }
 
+    fn mkdir_if_not_exists(p: &Path) {
+        if !p.exists() {
+            log::info!("Creating directory {:?}", p);
+            std::fs::DirBuilder::new().mode(0o770).create(&p).unwrap();
+        }
+    }
+
     fn filename(self: &Config, basename: &str) -> PathBuf {
         let mut p = self.appdir.clone();
+        Self::mkdir_if_not_exists(&p);
         p.push(basename);
         p
     }
@@ -168,15 +222,16 @@ impl Config {
 
     pub fn mp3_dir(&self) -> PathBuf {
         // TODO ~/.cache/ektoboat/mp3
-        // TODO create if not exists
-        self.filename("mp3")
+        let dir = self.filename("mp3");
+        Self::mkdir_if_not_exists(&dir);
+        dir
     }
 }
 
 impl Default for Config {
     fn default() -> Config {
         let mut appdir = PathBuf::from(&std::env::var("HOME").unwrap_or("/".to_string()));
-        appdir.push(".ektobot");
+        appdir.push(".ektoboat");
 
         Config {
             verbose: 0,
@@ -216,6 +271,14 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             let store = model::Store::new(config.db_path());
             let album = source::fetch(url, &config.mp3_dir())?;
             store.save(&album)?;
+        }
+        Action::Video {
+            input,
+            image,
+            output,
+        } => {
+            video::convert_file(input, image, output)?;
+            println!("{:?}", output.canonicalize()?);
         }
     }
 
