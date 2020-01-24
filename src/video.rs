@@ -17,6 +17,7 @@ pub fn find_cover(dir: &Path) -> Result<PathBuf, util::Error> {
 
     let mut result = PathBuf::from(dir);
     result.push(find_cover_vec(fnames)?);
+    log::debug!("Using {:?} as a cover", result);
     Ok(result)
 }
 
@@ -58,7 +59,6 @@ pub fn convert_file(
     out_file: &Path,
 ) -> Result<(), util::Error> {
     log::info!("Converting {:?}", audio_file);
-    log::debug!("Using {:?} as a cover", image_file);
 
     #[rustfmt::skip]
     let output = process::Command::new("ffmpeg")

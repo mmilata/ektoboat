@@ -1,6 +1,7 @@
 use crate::model::*;
 use crate::util;
 
+use std::fmt::Write;
 use std::io::{copy, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -17,6 +18,7 @@ use zip;
 pub trait Source {
     fn belongs(&self, url: &str) -> bool;
     fn fetch(&self, url: &str, mp3_dir: &Path) -> Result<Album, util::Error>;
+    fn description(&self, album: &Album, track: &Track) -> Result<String, util::Error>;
 }
 
 const SOURCES: [&dyn Source; 1] = [&Ektoplazm {}];
@@ -29,6 +31,19 @@ pub fn fetch(url: &str, mp3_dir: &Path) -> Result<Album, util::Error> {
     }
 
     Err(util::Error::new(&format!("No source known for {}", url)))
+}
+
+pub fn description(album: &Album, track: &Track) -> Result<String, util::Error> {
+    for s in &SOURCES {
+        if s.belongs(&album.url) {
+            return s.description(album, track);
+        }
+    }
+
+    Err(util::Error::new(&format!(
+        "No source known for {}",
+        album.url
+    )))
 }
 
 struct Ektoplazm {}
@@ -59,6 +74,7 @@ impl Source for Ektoplazm {
             labels: labels,
             tags: tags,
             tracks: tracks,
+            youtube_id: None,
         };
 
         let tmpdir = tmpdir.into_path();
@@ -68,6 +84,42 @@ impl Source for Ektoplazm {
         }
 
         Ok(album)
+    }
+
+    fn description(&self, album: &Album, track: &Track) -> Result<String, util::Error> {
+        let mut trackno = 99;
+        for (n, t) in album.tracks.iter().enumerate() {
+            if track == t {
+                trackno = n + 1;
+                break;
+            }
+        }
+
+        let mut result = format!("Download the full album from Ektoplazm: {}\n", album.url);
+
+        write!(result, "\nArtist: {}", track.artist)?;
+        write!(result, "\nTrack: {}", track.title)?;
+        if let Some(y) = album.year {
+            write!(result, "\nAlbum: {} ({})", album.title, y)?;
+        } else {
+            write!(result, "\nAlbum: {}", album.title)?;
+        }
+        write!(result, "\nTrack number: {:02}", trackno)?;
+        if let Some(b) = track.bpm {
+            write!(result, "\nBPM: {}", b)?;
+        }
+        write!(result, "\n")?;
+        if !album.tags.is_empty() {
+            write!(result, "\nTags: {}", album.tags.join(", "))?;
+        }
+        if !album.labels.is_empty() {
+            write!(result, "\nReleased by: {}", album.labels.join(" & "))?;
+        }
+        if let Some(l) = &album.license {
+            write!(result, "\nLicense: {}", l)?;
+        }
+
+        Ok(result)
     }
 }
 
@@ -94,7 +146,6 @@ fn required_tag<T>(result: Option<T>, what: &str, path: &Path) -> Result<T, util
     )))
 }
 
-//TODO: VA
 fn read_id3(dir: &Path) -> Result<(String, Option<String>, Option<u16>, Vec<Track>), util::Error> {
     let mut tracks: Vec<(u32, Track)> = Vec::new();
     let mut album_artist: Option<String> = None;
@@ -129,6 +180,8 @@ fn read_id3(dir: &Path) -> Result<(String, Option<String>, Option<u16>, Vec<Trac
                     .and_then(|f| f.content().text())
                     .and_then(|t| t.parse().ok()),
                 mp3_file: Some(PathBuf::from(f.file_name())),
+                video_file: None,
+                youtube_id: None,
             },
         ));
 
@@ -139,6 +192,10 @@ fn read_id3(dir: &Path) -> Result<(String, Option<String>, Option<u16>, Vec<Trac
 
     tracks.sort_by_key(|t| t.0);
     let tracks = tracks.into_iter().map(|t| t.1).collect();
+
+    if album_artist == Some("VA".to_string()) {
+        album_artist = None;
+    }
 
     match album_title {
         None => Err(util::Error::new("Album artist cannot be determined")),
@@ -342,33 +399,56 @@ mod tests {
                     title: "Digital Being".to_string(),
                     bpm: Some(88),
                     mp3_file: Some(PathBuf::from("01 - Risingson - Digital Being.mp3")),
+                    video_file: None,
+                    youtube_id: None,
                 },
                 Track {
                     artist: "Risingson".to_string(),
                     title: "Robosapiens".to_string(),
                     bpm: Some(97),
                     mp3_file: Some(PathBuf::from("02 - Risingson - Robosapiens.mp3")),
+                    video_file: None,
+                    youtube_id: None,
                 },
                 Track {
                     artist: "Risingson".to_string(),
                     title: "Predestination".to_string(),
                     bpm: Some(88),
                     mp3_file: Some(PathBuf::from("03 - Risingson - Predestination.mp3")),
+                    video_file: None,
+                    youtube_id: None,
                 },
             ]
         );
+    }
 
-        let a = Album {
-            url: "".to_string(),
+    #[test]
+    fn description_ektoplazm() {
+        let testcases = [(
+            Album {
+                url: "https://ektoplazm.com/free-music/asdfasdf".to_string(),
 
-            artist: album_artist,
-            title: album_title,
-            license: None,
-            year: None,
-            labels: vec![],
-            tags: vec![],
-            tracks: tracks,
-        };
-        println!("{:?}", a.dirname(&PathBuf::from("/tmp")));
+                artist: Some("Risingson".to_string()),
+                title: "Forgot".to_string(),
+                license: None,
+                year: None,
+                labels: vec![],
+                tags: vec![],
+                tracks: vec![],
+            },
+            Track {
+                artist: "Risingson".to_string(),
+                title: "Digital Being".to_string(),
+                bpm: Some(88),
+                mp3_file: Some(PathBuf::from("01 - Risingson - Digital Being.mp3")),
+                video_file: None,
+                youtube_id: None,
+            },
+            "exp",
+        )];
+
+        for tc in &testcases {
+            println!("{}", description(&tc.0, &tc.1).unwrap());
+        }
     }
 }

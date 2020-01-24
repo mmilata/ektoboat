@@ -34,6 +34,15 @@ impl Error {
     }
 }
 
+impl From<&str> for Error {
+    fn from(msg: &str) -> Self {
+        Error {
+            msg: msg.to_string(),
+            source: None,
+        }
+    }
+}
+
 impl From<hyper::Error> for Error {
     fn from(err: hyper::Error) -> Self {
         Error {
@@ -47,6 +56,15 @@ impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error {
             msg: "IO error".to_string(),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
+impl From<std::fmt::Error> for Error {
+    fn from(err: std::fmt::Error) -> Self {
+        Error {
+            msg: "Formatting error".to_string(),
             source: Some(Box::new(err)),
         }
     }

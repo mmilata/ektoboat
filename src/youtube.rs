@@ -8,12 +8,13 @@ use std::vec::Vec;
 use google_youtube3 as youtube3;
 use hyper;
 use hyper_rustls;
+use serde::{Deserialize, Serialize};
 use yup_oauth2 as oauth2;
 use yup_oauth2::{ApplicationSecret, Authenticator, AuthenticatorDelegate, DiskTokenStorage};
 //use yup_hyper_mock as hyper_mock;
 use youtube3::YouTube;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoID(pub String);
 
 impl std::fmt::Display for VideoID {
@@ -28,7 +29,7 @@ impl VideoID {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlaylistID(pub String);
 
 impl std::fmt::Display for PlaylistID {
@@ -104,6 +105,7 @@ impl YT {
     }
 
     pub fn upload_video(&self, video: Video) -> Result<VideoID, util::Error> {
+        log::info!("Uploading {}", video.title);
         let mut v = youtube3::Video::default();
         v.snippet = Some(youtube3::VideoSnippet {
             title: Some(video.title),
@@ -141,6 +143,7 @@ impl YT {
     }
 
     pub fn create_playlist(&self, playlist: Playlist) -> Result<PlaylistID, util::Error> {
+        log::info!("Creating playlist {}", playlist.title);
         let mut p = youtube3::Playlist::default();
 
         let mut pstatus = youtube3::PlaylistStatus::default();
@@ -156,31 +159,37 @@ impl YT {
         let result = self.hub.playlists().insert(p).doit();
 
         let (res, inserted_playlist) = result?;
-        log::debug!("Success: {:?}", res);
-        log::debug!("Result: {:?}", inserted_playlist);
+        log::debug!("Success: {:#?}", res);
+        log::debug!("Result: {:#?}", inserted_playlist);
 
-        match inserted_playlist.id {
+        let playlist_id = match inserted_playlist.id {
             None => {
                 return Err(util::Error::new("API did not return playlist id"));
             }
-            Some(s) => Ok(PlaylistID(s)),
+            Some(s) => PlaylistID(s),
+        };
+
+        for video_id in &playlist.videos {
+            self.add_video_to_playlist(&playlist_id, video_id)?
         }
+
+        Ok(playlist_id)
     }
 
     pub fn add_video_to_playlist(
         &self,
-        playlist_id: PlaylistID,
-        video_id: VideoID,
+        playlist_id: &PlaylistID,
+        video_id: &VideoID,
     ) -> Result<(), util::Error> {
-        log::info!("Adding to playlist");
+        log::debug!("Adding {} to playlist {}", video_id, playlist_id);
         let mut pi = youtube3::PlaylistItem::default();
 
         let mut resid = youtube3::ResourceId::default();
         resid.kind = Some("youtube#video".to_string());
-        resid.video_id = Some(video_id.0);
+        resid.video_id = Some(video_id.0.clone());
 
         let mut psnippet = youtube3::PlaylistItemSnippet::default();
-        psnippet.playlist_id = Some(playlist_id.0);
+        psnippet.playlist_id = Some(playlist_id.0.clone());
         psnippet.resource_id = Some(resid);
 
         pi.snippet = Some(psnippet);
@@ -188,8 +197,8 @@ impl YT {
         let result = self.hub.playlist_items().insert(pi).doit();
         let (res, pi) = result?;
 
-        log::debug!("Success: {:?}", res);
-        log::debug!("Result: {:?}", pi);
+        log::debug!("Success: {:#?}", res);
+        log::debug!("Result: {:#?}", pi);
         Ok(())
     }
 }
@@ -236,4 +245,34 @@ impl AuthenticatorDelegate for EktoAuthenticatorDelegate {
             None
         }
     }
+}
+
+pub fn playlist_title(title: &str, artist: &Option<String>, year: &Option<u16>, tags: &Vec<String>) -> String {
+    const MAX_LEN: usize = 60;
+    let mut candidates = Vec::new();
+
+    if ! tags.is_empty() {
+        if let Some(y) = year {
+            candidates.push(format!("{} ({}) [{}]", title, y, tags.join(",")));
+        }
+        candidates.push(format!("{} [{}]", title, tags.join(",")));
+    }
+    if let Some(y) = year {
+        candidates.push(format!("{} ({})", title, y));
+    }
+    candidates.push(title.to_string());
+
+    if let Some(a) = artist {
+        candidates.iter_mut().map(|t| *t = format!("{} - {}", a, t)).count();
+        candidates.push(title.to_string());
+    }
+
+    for c in candidates {
+        if c.len() <= MAX_LEN {
+            return c;
+        }
+    }
+
+    // may panic, to do the right thing possibly requires unicode-segmentation library
+    title.chars().take(MAX_LEN).collect()
 }

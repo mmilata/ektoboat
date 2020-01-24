@@ -18,6 +18,8 @@ pub enum Action {
         image: PathBuf,
         output: PathBuf,
     },
+    URL(String),
+    Status(String),
 }
 
 pub struct Config {
@@ -128,7 +130,6 @@ impl Config {
                     )
                     .arg(
                         Arg::with_name("audio_file")
-                            .help("input file")
                             .index(1)
                             .required(true)
                             .help("Audio file for the video"),
@@ -139,6 +140,18 @@ impl Config {
                             .required(true)
                             .help("Image to be used for video (aka album cover)"),
                     ),
+            )
+            .subcommand(
+                App::new("url")
+                    .about("process source URL - download, convert to videos, upload to youtube")
+                    .setting(clap::AppSettings::DisableVersion)
+                    .arg(Arg::with_name("url").index(1).required(true)),
+            )
+            .subcommand(
+                App::new("status")
+                    .about("show URL status")
+                    .setting(clap::AppSettings::DisableVersion)
+                    .arg(Arg::with_name("url").index(1).required(true)),
             )
             .get_matches();
 
@@ -194,20 +207,19 @@ impl Config {
                 image: PathBuf::from(video_matches.value_of("image_file").unwrap()),
             };
         }
+        if let Some(ref url_matches) = matches.subcommand_matches("url") {
+            config.action = Action::URL(url_matches.value_of("url").unwrap().to_string());
+        }
+        if let Some(ref status_matches) = matches.subcommand_matches("status") {
+            config.action = Action::Status(status_matches.value_of("url").unwrap().to_string());
+        }
 
         config
     }
 
-    fn mkdir_if_not_exists(p: &Path) {
-        if !p.exists() {
-            log::info!("Creating directory {:?}", p);
-            std::fs::DirBuilder::new().mode(0o770).create(&p).unwrap();
-        }
-    }
-
     fn filename(self: &Config, basename: &str) -> PathBuf {
         let mut p = self.appdir.clone();
-        Self::mkdir_if_not_exists(&p);
+        mkdir_if_not_exists(&p);
         p.push(basename);
         p
     }
@@ -223,7 +235,14 @@ impl Config {
     pub fn mp3_dir(&self) -> PathBuf {
         // TODO ~/.cache/ektoboat/mp3
         let dir = self.filename("mp3");
-        Self::mkdir_if_not_exists(&dir);
+        mkdir_if_not_exists(&dir);
+        dir
+    }
+
+    pub fn video_dir(&self) -> PathBuf {
+        // TODO ~/.cache/ektoboat/video
+        let dir = self.filename("video");
+        mkdir_if_not_exists(&dir);
         dir
     }
 }
@@ -262,10 +281,6 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             let yt = yt()?;
             let playlist_id = yt.create_playlist(playlist.clone())?;
             println!("{}", playlist_id.as_url());
-            for video_id in &playlist.videos {
-                yt.add_video_to_playlist(playlist_id.clone(), video_id.clone())?;
-                log::debug!("done");
-            }
         }
         Action::Fetch(url) => {
             let store = model::Store::new(config.db_path());
@@ -280,7 +295,114 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             video::convert_file(input, image, output)?;
             println!("{:?}", output.canonicalize()?);
         }
+        Action::URL(url) => {
+            let store = model::Store::new(config.db_path());
+            run_url(url, &config, &store)?;
+        }
+        Action::Status(url) => {
+            let store = model::Store::new(config.db_path());
+            match store.get_album(url)? {
+                None => {
+                    println!("Not in database");
+                }
+                Some(album) => {
+                    album.print();
+                    println!("");
+                    println!("Has all mp3s:   {:?}", album.has_mp3(&config.mp3_dir()));
+                    println!("Has all videos: {:?}", album.has_video(&config.video_dir()));
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn run_url(url: &str, config: &Config, store: &model::Store) -> Result<(), util::Error> {
+    log::info!("Processing {}", url);
+    let mut album = match store.get_album(url)? {
+        None => source::fetch(url, &config.mp3_dir())?,
+        Some(album) => {
+            if album.has_mp3(&config.mp3_dir()) {
+                album
+            } else {
+                log::warn!("Album has missing audio files, re-fetching");
+                source::fetch(url, &config.mp3_dir())?
+            }
+        }
+    };
+    store.save(&album)?;
+
+    let album_video_dir = album.dirname(&config.video_dir());
+    if !album.has_video(&config.video_dir()) {
+        let cover_img = video::find_cover(&album.dirname(&config.mp3_dir()))?;
+        let album_mp3_dir = album.dirname(&config.mp3_dir());
+        mkdir_if_not_exists(&album_video_dir);
+
+        for mut tr in &mut album.tracks {
+            let basename = tr.mp3_file.as_ref().ok_or("MP3 file missing")?;
+            let mut mp3_file = album_mp3_dir.clone();
+            mp3_file.push(basename);
+
+            let mut video_file = album_video_dir.clone();
+            let basename = basename.with_extension("avi");
+            video_file.push(basename.clone());
+
+            video::convert_file(&mp3_file, &cover_img, &video_file)?;
+
+            tr.video_file = Some(basename);
+        }
+        store.save(&album)?;
+    }
+
+    let yt = youtube::YT::new(
+        config.client_secret().as_path(),
+        config.filename("youtube_token.json").as_path(),
+    )?;
+    // generate descriptions first, can't use reference to album inside the for loop
+    let descriptions = album
+        .tracks
+        .iter()
+        .map(|t| source::description(&album, t))
+        .collect::<Result<Vec<_>, _>>()?;
+    let album_tags = album.tags.clone();
+    for (mut tr, desc) in album.tracks.iter_mut().zip(descriptions.into_iter()) {
+        if let Some(yt_id) = &tr.youtube_id {
+            log::debug!("Track {} already has youtube id {}", tr.title, yt_id.as_url());
+            continue;
+        }
+
+        let mut video_file = album_video_dir.clone();
+        video_file.push(tr.video_file.as_ref().ok_or("Video file missing")?);
+        let args = youtube::Video {
+            title: format!("{} - {}", tr.artist, tr.title),
+            description: desc,
+            tags: album_tags.clone(),
+            filename: video_file,
+        };
+        tr.youtube_id = Some(yt.upload_video(args)?);
+        //TODO!!! store.save(&album)?;
+    }
+    store.save(&album)?;
+    //TODO: might delete videos here
+
+    if album.youtube_id.is_none() && album.tracks.iter().all(|t| t.youtube_id.is_some()) {
+        let args = youtube::Playlist {
+            title: youtube::playlist_title(&album.title, &album.artist, &album.year, &album.tags),
+            description: String::new(), // the description is not really visible
+            tags: album_tags,
+            videos: album.tracks.iter().map(|t| t.youtube_id.clone().expect("Video ID missing")).collect(),
+        };
+        album.youtube_id = Some(yt.create_playlist(args)?);
+        store.save(&album)?;
+    }
+
+    Ok(())
+}
+
+fn mkdir_if_not_exists(p: &Path) {
+    if !p.exists() {
+        log::info!("Creating directory {:?}", p);
+        std::fs::DirBuilder::new().mode(0o770).create(&p).unwrap();
+    }
 }
