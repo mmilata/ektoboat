@@ -435,6 +435,7 @@ mod tests {
                 labels: vec![],
                 tags: vec![],
                 tracks: vec![],
+                youtube_id: None,
             },
             Track {
                 artist: "Risingson".to_string(),

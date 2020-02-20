@@ -260,6 +260,7 @@ mod tests {
                 video_file: None,
                 youtube_id: Some(youtube::VideoID("asdf".to_string())),
             }],
+            youtube_id: Some(youtube::PlaylistID("PL0123".to_string())),
         };
         store.save(&album).unwrap();
         let a = store
