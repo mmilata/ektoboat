@@ -4,6 +4,7 @@ extern crate clap;
 extern crate lazy_static;
 extern crate log;
 
+mod cli;
 mod config;
 mod model;
 mod source;
