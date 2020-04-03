@@ -108,7 +108,13 @@ impl Album {
                 self.tags.join(", ")
             }
         );
-        println!("YT:      {}", self.youtube_id.as_ref().map(|i| i.as_url()).unwrap_or(nf.clone()));
+        println!(
+            "YT:      {}",
+            self.youtube_id
+                .as_ref()
+                .map(|i| i.as_url())
+                .unwrap_or(nf.clone())
+        );
         println!("Tracks:");
         for (i, t) in self.tracks.iter().enumerate() {
             let tnum = i + 1;
@@ -134,7 +140,13 @@ impl Album {
                     f.clone().into_os_string().to_string_lossy()
                 );
             }
-            println!("       YT:    {}", t.youtube_id.as_ref().map(|i| i.as_url()).unwrap_or(nf.clone()));
+            println!(
+                "       YT:    {}",
+                t.youtube_id
+                    .as_ref()
+                    .map(|i| i.as_url())
+                    .unwrap_or(nf.clone())
+            );
         }
     }
 }

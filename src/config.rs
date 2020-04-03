@@ -250,7 +250,11 @@ fn run_url(url: &str, config: &Config, store: &model::Store) -> Result<(), util:
     let album_tags = album.tags.clone();
     for (mut tr, desc) in album.tracks.iter_mut().zip(descriptions.into_iter()) {
         if let Some(yt_id) = &tr.youtube_id {
-            log::debug!("Track {} already has youtube id {}", tr.title, yt_id.as_url());
+            log::debug!(
+                "Track {} already has youtube id {}",
+                tr.title,
+                yt_id.as_url()
+            );
             continue;
         }
 
@@ -273,7 +277,11 @@ fn run_url(url: &str, config: &Config, store: &model::Store) -> Result<(), util:
             title: youtube::playlist_title(&album.title, &album.artist, &album.year, &album.tags),
             description: String::new(), // the description is not really visible
             tags: album_tags,
-            videos: album.tracks.iter().map(|t| t.youtube_id.clone().expect("Video ID missing")).collect(),
+            videos: album
+                .tracks
+                .iter()
+                .map(|t| t.youtube_id.clone().expect("Video ID missing"))
+                .collect(),
         };
         album.youtube_id = Some(yt.create_playlist(args)?);
         store.save(&album)?;

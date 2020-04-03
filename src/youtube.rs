@@ -247,11 +247,16 @@ impl AuthenticatorDelegate for EktoAuthenticatorDelegate {
     }
 }
 
-pub fn playlist_title(title: &str, artist: &Option<String>, year: &Option<u16>, tags: &Vec<String>) -> String {
+pub fn playlist_title(
+    title: &str,
+    artist: &Option<String>,
+    year: &Option<u16>,
+    tags: &Vec<String>,
+) -> String {
     const MAX_LEN: usize = 60;
     let mut candidates = Vec::new();
 
-    if ! tags.is_empty() {
+    if !tags.is_empty() {
         if let Some(y) = year {
             candidates.push(format!("{} ({}) [{}]", title, y, tags.join(",")));
         }
@@ -263,7 +268,10 @@ pub fn playlist_title(title: &str, artist: &Option<String>, year: &Option<u16>, 
     candidates.push(title.to_string());
 
     if let Some(a) = artist {
-        candidates.iter_mut().map(|t| *t = format!("{} - {}", a, t)).count();
+        candidates
+            .iter_mut()
+            .map(|t| *t = format!("{} - {}", a, t))
+            .count();
         candidates.push(title.to_string());
     }
 
