@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod model;
 mod source;
+mod store;
 mod util;
 mod video;
 mod youtube;

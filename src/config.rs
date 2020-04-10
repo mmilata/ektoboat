@@ -2,8 +2,8 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 use crate::cli;
-use crate::model;
 use crate::source;
+use crate::store;
 use crate::util;
 use crate::video;
 use crate::youtube;
@@ -32,7 +32,6 @@ pub struct Config {
 
 impl Config {
     // XXX logging is not set up at this point
-    // TODO generate completion
     pub fn from_cmdline() -> Config {
         let mut config = Config::default();
         let matches = cli::build_cli().get_matches();
@@ -165,7 +164,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{}", playlist_id.as_url());
         }
         Action::Fetch(url) => {
-            let store = model::Store::new(config.db_path());
+            let store = store::Store::new(config.db_path());
             let album = source::fetch(url, &config.mp3_dir())?;
             store.save(&album)?;
         }
@@ -178,11 +177,11 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{:?}", output.canonicalize()?);
         }
         Action::URL(url) => {
-            let store = model::Store::new(config.db_path());
+            let store = store::Store::new(config.db_path());
             run_url(url, &config, &store)?;
         }
         Action::Status(url) => {
-            let store = model::Store::new(config.db_path());
+            let store = store::Store::new(config.db_path());
             match store.get_album(url)? {
                 None => {
                     println!("Not in database");
@@ -200,7 +199,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
     Ok(())
 }
 
-fn run_url(url: &str, config: &Config, store: &model::Store) -> Result<(), util::Error> {
+fn run_url(url: &str, config: &Config, store: &store::Store) -> Result<(), util::Error> {
     log::info!("Processing {}", url);
     let mut album = match store.get_album(url)? {
         None => source::fetch(url, &config.mp3_dir())?,
