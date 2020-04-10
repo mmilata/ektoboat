@@ -98,4 +98,22 @@ impl From<google_youtube3::Error> for Error {
     }
 }
 
+impl From<serde_json::error::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error {
+            msg: format!("JSON error: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(err: rusqlite::Error) -> Self {
+        Error {
+            msg: format!("SQLite error: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

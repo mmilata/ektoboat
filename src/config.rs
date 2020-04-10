@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::cli;
 use crate::source;
 use crate::store;
+use crate::store::Store;
 use crate::util;
 use crate::video;
 use crate::youtube;
@@ -164,7 +165,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{}", playlist_id.as_url());
         }
         Action::Fetch(url) => {
-            let store = store::Store::new(config.db_path());
+            let mut store = store::JsonStore::open(&config.db_path())?;
             let album = source::fetch(url, &config.mp3_dir())?;
             store.save(&album)?;
         }
@@ -177,11 +178,11 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{:?}", output.canonicalize()?);
         }
         Action::URL(url) => {
-            let store = store::Store::new(config.db_path());
-            run_url(url, &config, &store)?;
+            let mut store = store::JsonStore::open(&config.db_path())?;
+            run_url(url, &config, &mut store)?;
         }
         Action::Status(url) => {
-            let store = store::Store::new(config.db_path());
+            let mut store = store::JsonStore::open(&config.db_path())?;
             match store.get_album(url)? {
                 None => {
                     println!("Not in database");
@@ -199,7 +200,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
     Ok(())
 }
 
-fn run_url(url: &str, config: &Config, store: &store::Store) -> Result<(), util::Error> {
+fn run_url(url: &str, config: &Config, store: &mut store::JsonStore) -> Result<(), util::Error> {
     log::info!("Processing {}", url);
     let mut album = match store.get_album(url)? {
         None => source::fetch(url, &config.mp3_dir())?,
