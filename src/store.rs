@@ -3,23 +3,12 @@ use crate::util;
 use crate::youtube;
 
 use rusqlite::OptionalExtension;
+use serde_json;
 
+use std::path::{Path, PathBuf};
 use std::result::Result;
 
-use serde_json;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
-
-pub trait Store: Sized {
-    fn open(path: &Path) -> Result<Self, util::Error>;
-    fn get_album(&mut self, id: &str) -> Result<Option<Album>, util::Error>;
-    fn save(&mut self, album: &Album) -> Result<(), util::Error>;
-}
-
-pub struct SqliteStore {
+pub struct Store {
     conn: rusqlite::Connection,
 }
 
@@ -47,8 +36,8 @@ impl rusqlite::types::FromSql for youtube::VideoID {
     }
 }
 
-impl Store for SqliteStore {
-    fn open(path: &Path) -> Result<SqliteStore, util::Error> {
+impl Store {
+    pub fn open(path: &Path) -> Result<Store, util::Error> {
         let conn = rusqlite::Connection::open(path)?;
 
         conn.pragma_update(None, "foreign_keys", &"on")?;
@@ -84,10 +73,11 @@ impl Store for SqliteStore {
             rusqlite::NO_PARAMS,
         )?;
 
-        Ok(SqliteStore { conn: conn })
+        log::debug!("Opened state file: {:?}", path);
+        Ok(Store { conn: conn })
     }
 
-    fn get_album(&mut self, url: &str) -> Result<Option<Album>, util::Error> {
+    pub fn get_album(&mut self, url: &str) -> Result<Option<Album>, util::Error> {
         let tx = self.conn.transaction()?;
 
         let mut stmt = tx.prepare(
@@ -139,13 +129,15 @@ impl Store for SqliteStore {
         Ok(Some(album))
     }
 
-    fn save(&mut self, album: &Album) -> Result<(), util::Error> {
+    pub fn save(&mut self, album: &Album) -> Result<(), util::Error> {
         let tx = self.conn.transaction()?;
 
         let res: Option<i64> = tx
-            .query_row("SELECT id FROM album WHERE url = ?1", &[&album.url], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT id FROM album WHERE url = ?1",
+                &[&album.url],
+                |row| row.get(0),
+            )
             .optional()?;
         if let Some(album_id) = res {
             tx.execute("DELETE FROM track WHERE album_id = ?1", &[album_id])?;
@@ -179,8 +171,12 @@ impl Store for SqliteStore {
                 t.title,
                 t.bpm,
                 //t.mp3_file.and_then(|f| f.to_str().as_string()),
-                t.mp3_file.as_ref().and_then(|f| f.to_str().map(|s| String::from(s))),
-                t.video_file.as_ref().and_then(|f| f.to_str().map(|s| String::from(s))),
+                t.mp3_file
+                    .as_ref()
+                    .and_then(|f| f.to_str().map(|s| String::from(s))),
+                t.video_file
+                    .as_ref()
+                    .and_then(|f| f.to_str().map(|s| String::from(s))),
                 //t.video_file.and_then(|f| f.to_str().map(|s| s.as_string())),
                 t.youtube_id,
             ])?;
@@ -205,98 +201,22 @@ fn at_most_one<T: Iterator>(mut it: T) -> Result<Option<T::Item>, util::Error> {
     Ok(Some(first))
 }
 
-#[derive(Debug)]
-pub struct JsonStore {
-    filename: PathBuf,
-}
-
-type DB = HashMap<String, Album>;
-
-impl JsonStore {
-    fn read_db(&self) -> io::Result<DB> {
-        let file = File::open(&self.filename);
-        if let Err(e) = file {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                return Ok(DB::new());
-            } else {
-                return Err(e);
-            }
-        }
-        let file = file.unwrap();
-        let reader = BufReader::new(file);
-        let db: DB = serde_json::from_reader(reader)?;
-
-        Ok(db)
-    }
-
-    fn write_db(&self, db: DB) -> io::Result<()> {
-        let mut tmppath = self.filename.clone();
-        if !tmppath.set_extension("json-new") {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to come up with temporary DB filename for {:?}",
-                    self.filename
-                ),
-            ));
-        }
-
-        let file = File::create(&tmppath)?;
-        serde_json::to_writer_pretty(file, &db)?;
-        std::fs::rename(tmppath, &self.filename)?;
-
-        Ok(())
-    }
-}
-
-impl Store for JsonStore {
-    fn open(path: &Path) -> Result<JsonStore, util::Error> {
-        //tmp.write(b"{}").unwrap();
-        Ok(JsonStore {
-            filename: PathBuf::from(path),
-        })
-    }
-
-    fn get_album(&mut self, id: &str) -> Result<Option<Album>, util::Error> {
-        let db = self.read_db()?;
-        let ov = db.get(id);
-
-        match ov {
-            None => Ok(None),
-            Some(a) => {
-                let mut aa = a.clone();
-                aa.url = id.to_string();
-                Ok(Some(aa))
-            }
-        }
-    }
-
-    fn save(&mut self, album: &Album) -> Result<(), util::Error> {
-        let mut db = self.read_db()?;
-        db.insert(album.url.clone(), album.clone());
-        self.write_db(db)?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{Album, Track};
     use crate::youtube;
-    use std::io::Write;
     use tempfile;
 
-    fn simple_roundtrip<T: Store>() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
-        //tmp.write(b"{}").unwrap();
+    #[test]
+    fn simple_roundtrip() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
         let tmppath = tmp.path();
-        std::fs::remove_file(tmppath).unwrap(); //we just need a path to nonexistent file
-
-        let (tmp, tmppath) = tmp.keep().unwrap();
-        println!("store path: {:?}", tmppath);
-
-        let mut store = T::open(&tmppath).unwrap();
+        //we just need a path to nonexistent file
+        std::fs::remove_file(tmppath).unwrap();
+        //let (_tmp, tmppath) = tmp.keep().unwrap();
+        //println!("store path: {:?}", tmppath);
+        let mut store = Store::open(&tmppath).unwrap();
 
         let album_url = "https://ektoplazm.com/free-music/globular-entangled-everything";
         let a = store.get_album(album_url).unwrap();
@@ -326,7 +246,7 @@ mod tests {
         let b = store.get_album(album_url).unwrap();
         assert_eq!(album, b.unwrap());
 
-        let mut store2 = T::open(&tmppath).unwrap();
+        let mut store2 = Store::open(&tmppath).unwrap();
         let c = store2.get_album(album_url).unwrap();
         assert_eq!(album, c.unwrap());
 
@@ -343,15 +263,5 @@ mod tests {
         store.save(&album).unwrap();
         let d = store.get_album(album_url).unwrap();
         assert_eq!(album, d.unwrap());
-    }
-
-    #[test]
-    fn simple_roundtrip_json() {
-        simple_roundtrip::<JsonStore>()
-    }
-
-    #[test]
-    fn simple_roundtrip_sqlite() {
-        simple_roundtrip::<SqliteStore>()
     }
 }

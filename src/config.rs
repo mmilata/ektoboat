@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use crate::cli;
 use crate::source;
 use crate::store;
-use crate::store::Store;
 use crate::util;
 use crate::video;
 use crate::youtube;
@@ -111,7 +110,7 @@ impl Config {
     }
 
     pub fn db_path(&self) -> PathBuf {
-        self.filename("state.json")
+        self.filename("state.sqlite3")
     }
 
     pub fn mp3_dir(&self) -> PathBuf {
@@ -165,7 +164,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{}", playlist_id.as_url());
         }
         Action::Fetch(url) => {
-            let mut store = store::JsonStore::open(&config.db_path())?;
+            let mut store = store::Store::open(&config.db_path())?;
             let album = source::fetch(url, &config.mp3_dir())?;
             store.save(&album)?;
         }
@@ -178,11 +177,11 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             println!("{:?}", output.canonicalize()?);
         }
         Action::URL(url) => {
-            let mut store = store::JsonStore::open(&config.db_path())?;
+            let mut store = store::Store::open(&config.db_path())?;
             run_url(url, &config, &mut store)?;
         }
         Action::Status(url) => {
-            let mut store = store::JsonStore::open(&config.db_path())?;
+            let mut store = store::Store::open(&config.db_path())?;
             match store.get_album(url)? {
                 None => {
                     println!("Not in database");
@@ -200,7 +199,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
     Ok(())
 }
 
-fn run_url(url: &str, config: &Config, store: &mut store::JsonStore) -> Result<(), util::Error> {
+fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), util::Error> {
     log::info!("Processing {}", url);
     let mut album = match store.get_album(url)? {
         None => source::fetch(url, &config.mp3_dir())?,
@@ -247,8 +246,9 @@ fn run_url(url: &str, config: &Config, store: &mut store::JsonStore) -> Result<(
         .iter()
         .map(|t| source::description(&album, t))
         .collect::<Result<Vec<_>, _>>()?;
-    let album_tags = album.tags.clone();
-    for (mut tr, desc) in album.tracks.iter_mut().zip(descriptions.into_iter()) {
+
+    for (i, desc) in descriptions.into_iter().enumerate() {
+        let tr = album.tracks[i].clone();
         if let Some(yt_id) = &tr.youtube_id {
             log::debug!(
                 "Track {} already has youtube id {}",
@@ -263,20 +263,19 @@ fn run_url(url: &str, config: &Config, store: &mut store::JsonStore) -> Result<(
         let args = youtube::Video {
             title: format!("{} - {}", tr.artist, tr.title),
             description: desc,
-            tags: album_tags.clone(),
+            tags: album.tags.clone(),
             filename: video_file,
         };
-        tr.youtube_id = Some(yt.upload_video(args)?);
-        //TODO!!! store.save(&album)?;
+        album.tracks[i].youtube_id = Some(yt.upload_video(args)?);
+        store.save(&album)?;
     }
-    store.save(&album)?;
-    //TODO: might delete videos here
+    //TODO: can delete videos here
 
     if album.youtube_id.is_none() && album.tracks.iter().all(|t| t.youtube_id.is_some()) {
         let args = youtube::Playlist {
             title: youtube::playlist_title(&album.title, &album.artist, &album.year, &album.tags),
             description: String::new(), // the description is not really visible
-            tags: album_tags,
+            tags: album.tags.clone(),
             videos: album
                 .tracks
                 .iter()
