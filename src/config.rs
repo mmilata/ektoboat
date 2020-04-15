@@ -222,6 +222,8 @@ pub fn run(config: Config) -> Result<(), util::Error> {
 }
 
 fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), util::Error> {
+    let blacklist = store.blacklist()?; // maybe don't init this every time in daemon
+
     log::info!("Processing {}", url);
     let mut album = match store.get_album(url)? {
         None => source::fetch(url, &config.mp3_dir())?,
@@ -235,6 +237,15 @@ fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), u
         }
     };
     store.save(&album)?;
+
+    /*
+    if album.license.is_none() {
+        return Err(util::Error::new("Album has no license"));
+    }
+    */
+    if blacklist.matches(&album) {
+        return Err(util::Error::new("Album blacklisted"));
+    }
 
     let album_video_dir = album.dirname(&config.video_dir());
     if !album.has_video(&config.video_dir()) {
@@ -257,6 +268,7 @@ fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), u
         }
         store.save(&album)?;
     }
+    //TODO: can delete mp3s here
 
     let yt = youtube::YT::new(
         config.client_secret().as_path(),

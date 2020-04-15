@@ -1,5 +1,7 @@
+use crate::util;
 use crate::youtube;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -163,4 +165,153 @@ pub struct Track {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub youtube_id: Option<youtube::VideoID>,
+}
+
+pub struct Blacklist {
+    artists: Vec<Regex>,
+    labels: Vec<Regex>,
+}
+
+impl Blacklist {
+    pub fn new<T>(artists: T, labels: T) -> Result<Blacklist, util::Error>
+    where
+        T: IntoIterator,
+        T::Item: AsRef<str>,
+    {
+        let mut res = Blacklist {
+            artists: vec![],
+            labels: vec![],
+        };
+        let pat = |s: T::Item| format!(r"(?i)^{}$", s.as_ref());
+
+        for s in artists {
+            res.artists.push(Regex::new(&pat(s))?);
+        }
+        for s in labels {
+            res.labels.push(Regex::new(&pat(s))?);
+        }
+        Ok(res)
+    }
+
+    pub fn matches(&self, album: &Album) -> bool {
+        if self
+            .labels
+            .iter()
+            .any(|r| album.labels.iter().any(|l| r.is_match(l)))
+        {
+            return true;
+        }
+
+        if self
+            .artists
+            .iter()
+            .any(|r| album.tracks.iter().any(|t| r.is_match(&t.artist)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blacklist() {
+        let black_artists = vec!["donald duck", "agh[0o]ri tantrik"];
+        let black_labels = vec!["sony", "sonic tantra .*", "supraphon"];
+        let blacklist = Blacklist::new(black_artists, black_labels).unwrap();
+
+        let album = Album {
+            url: "https://ektoplazm.com/free-music/haltya-japan-anime-punk-sessions-ep".to_string(),
+            artist: Some("Haltya".to_string()),
+            title: "Japan Anime Punk Sessions EP".to_string(),
+            license: Some("https://creativecommons.org/licenses/by-nc-nd/3.0/".to_string()),
+            year: Some(2012),
+            labels: vec!["Not Really".to_string()],
+            tags: vec!["Experimental".to_string(), "Suomi".to_string()],
+            tracks: vec![
+                Track {
+                    artist: "Haltya".to_string(),
+                    title: "Övertüre".to_string(),
+                    bpm: None,
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+                Track {
+                    artist: "Haltya".to_string(),
+                    title: "Hiro In The Sky With Diamonds".to_string(),
+                    bpm: None,
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+            ],
+            youtube_id: None,
+        };
+        assert!(!blacklist.matches(&album));
+
+        let album = Album {
+            url: "https://ektoplazm.com/free-music/sonic-shamans-vol-ii".to_string(),
+            artist: Some("VA".to_string()),
+            title: "Sonic Shamans Vol. II".to_string(),
+            license: Some("https://creativecommons.org/licenses/by-nc-nd/4.0/".to_string()),
+            year: Some(2015),
+            labels: vec!["Sonic Tantra Records".to_string()],
+            tags: vec!["Darkpsy".to_string(), "Psycore".to_string()],
+            tracks: vec![
+                Track {
+                    artist: "Overdream".to_string(),
+                    title: "Skip Sick!".to_string(),
+                    bpm: Some(150),
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+                Track {
+                    artist: "Goch".to_string(),
+                    title: "Falling Stone".to_string(),
+                    bpm: Some(150),
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+            ],
+            youtube_id: None,
+        };
+        assert!(blacklist.matches(&album));
+
+        let album = Album {
+            url: "https://ektoplazm.com/free-music/high-tech-mechanica".to_string(),
+            artist: Some("VA".to_string()),
+            title: "High Tech Mechanica".to_string(),
+            license: Some("https://creativecommons.org/licenses/by-nc-sa/3.0/".to_string()),
+            year: Some(2011),
+            labels: vec!["Cosmic Crew Records".to_string()],
+            tags: vec!["Hi-Tech".to_string(), "Psycore".to_string()],
+            tracks: vec![
+                Track {
+                    artist: "Murukhan".to_string(),
+                    title: "General Dynamicz".to_string(),
+                    bpm: Some(175),
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+                Track {
+                    artist: "Aghori Tantrik".to_string(),
+                    title: "Ending Lunatic Behaviour".to_string(),
+                    bpm: Some(165),
+                    mp3_file: None,
+                    video_file: None,
+                    youtube_id: None,
+                },
+            ],
+            youtube_id: None,
+        };
+        assert!(blacklist.matches(&album));
+    }
 }

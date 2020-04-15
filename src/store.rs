@@ -1,4 +1,4 @@
-use crate::model::{Album, Track};
+use crate::model::{Album, Blacklist, Track};
 use crate::util;
 use crate::youtube;
 
@@ -81,6 +81,16 @@ impl Store {
                 result      TEXT,
                 result_date TEXT,
                 UNIQUE      (url, action)
+            )",
+            rusqlite::NO_PARAMS,
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS blacklist (
+                id      INTEGER PRIMARY KEY,
+                type    TEXT NOT NULL CHECK(type IN ('artist', 'label')),
+                pattern TEXT NOT NULL,
+                UNIQUE  (type, pattern)
             )",
             rusqlite::NO_PARAMS,
         )?;
@@ -234,6 +244,23 @@ impl Store {
         )?;
 
         Ok(())
+    }
+
+    pub fn blacklist(&mut self) -> Result<Blacklist, util::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pattern
+             FROM blacklist
+             WHERE type = ?1",
+        )?;
+
+        let artists: Vec<String> = stmt
+            .query_map(&["artist"], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        let labels: Vec<String> = stmt
+            .query_map(&["label"], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+
+        Ok(Blacklist::new(artists, labels)?)
     }
 }
 

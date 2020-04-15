@@ -1,8 +1,9 @@
-use hyper;
 use std::convert::From;
 use std::error;
 
 pub const USER_AGENT: &str = "ektoboat/1";
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct Error {
@@ -116,4 +117,11 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+impl From<regex::Error> for Error {
+    fn from(err: regex::Error) -> Self {
+        Error {
+            msg: format!("Regex error: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
