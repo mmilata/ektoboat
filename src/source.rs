@@ -1,6 +1,7 @@
 use crate::model::*;
 use crate::util;
 
+use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::{copy, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -56,7 +57,7 @@ impl Source for Ektoplazm {
     fn fetch(&self, url: &str, mp3_dir: &Path) -> Result<Album, util::Error> {
         log::info!("Fetching {}", url);
         let res = download(url)?;
-        let (mp3_link, license_link, labels, tags) = ektoplazm_parse(res)?;
+        let (mp3_link, license_link, labels, tags, _) = ektoplazm_parse(res)?;
         let mut res = download(&mp3_link)?;
 
         let mut tmp = tempfile::tempfile()?;
@@ -227,7 +228,7 @@ fn download(url: &str) -> Result<hyper::client::response::Response, util::Error>
 
 fn ektoplazm_parse<T: Read>(
     res: T,
-) -> util::Result<(String, Option<String>, Vec<String>, Vec<String>)> {
+) -> util::Result<(String, Option<String>, Vec<String>, Vec<String>, u32)> {
     let doc = Document::from_read(res)?;
 
     let mp3_link = match doc
@@ -261,7 +262,9 @@ fn ektoplazm_parse<T: Read>(
         .map(|tag| tag.text())
         .collect();
 
-    Ok((mp3_link, license_link, labels, tags))
+    let tracknum = doc.find(Class("tl").descendant(Class("t"))).count();
+
+    Ok((mp3_link, license_link, labels, tags, tracknum as u32))
 }
 
 fn unpack<T: Read + Seek>(res: T, outdir: &Path) -> Result<tempfile::TempDir, util::Error> {
@@ -293,6 +296,71 @@ fn unpack<T: Read + Seek>(res: T, outdir: &Path) -> Result<tempfile::TempDir, ut
     Ok(tmpdir)
 }
 
+pub struct EktoplazmScraper {
+    next_page: u32,
+    urls: VecDeque<String>,
+}
+
+impl EktoplazmScraper {
+    pub fn from_offset(offset: u32) -> EktoplazmScraper {
+        EktoplazmScraper {
+            next_page: 1 + offset / 5,
+            urls: VecDeque::new(),
+        }
+    }
+}
+
+impl std::iter::Iterator for EktoplazmScraper {
+    type Item = Result<String, util::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.urls.is_empty() {
+            self.urls = match ektoplazm_scrape_list(self.next_page) {
+                Err(e) => return Some(Err(e)),
+                Ok(urls) => urls,
+            };
+            self.next_page += 1;
+        }
+
+        let url = self.urls.pop_front()?;
+        /*
+        let (tracks, zipbytes) = match ektoplazm_scrape_album(&url) {
+            Err(e) => return Some(Err(e)),
+            Ok((t, z)) => (t, z),
+        };
+        Some(Ok((url, tracks, zipbytes)))
+        */
+        Some(Ok(url))
+    }
+}
+
+fn ektoplazm_scrape_list(offset: u32) -> Result<VecDeque<String>, util::Error> {
+    let url = format!("https://ektoplazm.com/section/free-music/page/{}", offset);
+    let res = download(&url)?;
+    let doc = Document::from_read(res)?;
+
+    let links = doc
+        .find(Class("post").child(Name("h1")).child(Name("a")))
+        .filter_map(|tag| tag.attr("href"))
+        .map(|x| x.to_string())
+        .collect();
+
+    Ok(links)
+}
+
+/*
+fn ektoplazm_scrape_album(url: &str) -> Result<(u32, u32), util::Error> {
+    let res = download(url)?;
+    let (mp3_link, _, _, _, _tracks) = ektoplazm_parse(res)?;
+
+    let res = download(&mp3_link)?;
+    let length = res.headers.get::<hyper::header::ContentLength>().map(|n| n.0 as u32).unwrap_or(0);
+    drop(res);
+
+    Ok((tracks, length))
+}
+*/
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +386,7 @@ mod tests {
                 Some("https://creativecommons.org/licenses/by-nc-sa/4.0/"),
                 Vec::new(),
                 vec!["Downtempo", "Psy Dub"],
+                10,
             ),
             (
                 "ektoplazm-label.html",
@@ -325,6 +394,7 @@ mod tests {
                 Some("https://creativecommons.org/licenses/by-nc-sa/3.0/"),
                 vec!["3L3Mental Records"],
                 vec!["Full-On", "Morning"],
+                4,
             ),
             (
                 "ektoplazm-va.html",
@@ -332,6 +402,7 @@ mod tests {
                 Some("https://creativecommons.org/licenses/by-nc-sa/4.0/"),
                 vec!["Jaira Records"],
                 vec!["Techno", "Techtrance", "Zenonesque"],
+                9,
             ),
             (
                 "ektoplazm-multilabel.html",
@@ -339,6 +410,7 @@ mod tests {
                 Some("https://creativecommons.org/licenses/by-nc-sa/4.0/"),
                 vec!["Anomalistic Records", "Splatterkore Reck-ords"],
                 vec!["Experimental", "Psycore"],
+                8,
             ),
         ];
 
@@ -349,11 +421,12 @@ mod tests {
             d.push(c.0);
 
             let f = fs::File::open(d).unwrap();
-            let (mp3, license, labels, tags) = ektoplazm_parse(f).unwrap();
+            let (mp3, license, labels, tags, tracknum) = ektoplazm_parse(f).unwrap();
             assert_eq!(mp3, c.1.to_string());
             assert_eq!(license, c.2.map(|x| x.to_string()));
             assert_eq!(labels, c.3);
             assert_eq!(tags, c.4);
+            assert_eq!(tracknum, c.5);
         }
     }
 

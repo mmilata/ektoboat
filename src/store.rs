@@ -73,6 +73,18 @@ impl Store {
             rusqlite::NO_PARAMS,
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS queue (
+                id          INTEGER PRIMARY KEY,
+                action      TEXT NOT NULL,
+                url         TEXT NOT NULL,
+                result      TEXT,
+                result_date TEXT,
+                UNIQUE      (url, action)
+            )",
+            rusqlite::NO_PARAMS,
+        )?;
+
         log::debug!("Opened state file: {:?}", path);
         Ok(Store { conn: conn })
     }
@@ -170,20 +182,57 @@ impl Store {
                 t.artist,
                 t.title,
                 t.bpm,
-                //t.mp3_file.and_then(|f| f.to_str().as_string()),
                 t.mp3_file
                     .as_ref()
                     .and_then(|f| f.to_str().map(|s| String::from(s))),
                 t.video_file
                     .as_ref()
                     .and_then(|f| f.to_str().map(|s| String::from(s))),
-                //t.video_file.and_then(|f| f.to_str().map(|s| s.as_string())),
                 t.youtube_id,
             ])?;
         }
         drop(stmt);
 
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn queue_insert(&mut self, url: &str) -> Result<(), util::Error> {
+        self.conn.execute(
+            "INSERT OR REPLACE
+             INTO queue (action, url)
+             VALUES ('url', ?1)",
+            params![url,],
+        )?;
+        Ok(())
+    }
+
+    pub fn queue_get(&mut self) -> Result<Option<(String, String)>, util::Error> {
+        let res = self
+            .conn
+            .query_row(
+                "SELECT action, url FROM queue WHERE result IS NULL ORDER BY id ASC LIMIT 1",
+                rusqlite::NO_PARAMS,
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        Ok(res)
+    }
+
+    pub fn queue_result(
+        &mut self,
+        action: String,
+        url: String,
+        result: String,
+    ) -> Result<(), util::Error> {
+        self.conn.execute(
+            "UPDATE queue
+             SET result = ?1, result_date = ?2
+             WHERE url = ?3 AND action = ?4",
+            params![result, chrono::Local::now(), url, action,],
+        )?;
+
         Ok(())
     }
 }

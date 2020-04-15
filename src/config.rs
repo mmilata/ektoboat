@@ -10,6 +10,7 @@ use crate::youtube;
 
 pub enum Action {
     Help,
+    Scrape(u32),
     YTUpload(youtube::Video),
     YTPlaylist(youtube::Playlist),
     Fetch(String),
@@ -42,6 +43,14 @@ impl Config {
             config.appdir = PathBuf::from(matches.value_of("statedir").unwrap());
         }
 
+        if let Some(ref scrape_matches) = matches.subcommand_matches("scrape-ektoplazm") {
+            let off: u32 = scrape_matches
+                .value_of("offset")
+                .unwrap()
+                .parse()
+                .expect("unsigned integer");
+            config.action = Action::Scrape(off);
+        }
         if let Some(ref youtube_matches) = matches.subcommand_matches("yt-upload") {
             config.action = Action::YTUpload(youtube::Video {
                 title: youtube_matches.value_of("title").unwrap().to_string(),
@@ -154,6 +163,19 @@ pub fn run(config: Config) -> Result<(), util::Error> {
             return Err(util::Error::new(
                 "You have to specify an action, use --help for help",
             ));
+        }
+        Action::Scrape(off) => {
+            let mut store = store::Store::open(&config.db_path())?;
+
+            for (i, x) in source::EktoplazmScraper::from_offset(*off).enumerate() {
+                // let (url, tracks, zipbytes) = x?;
+                // println!("{} {}\t{}\t{}", (i as u32)+off, tracks, zipbytes, url);
+                let url = x?;
+                println!("{} {}", (i as u32) + off, url);
+                store.queue_insert(&url)?;
+                // doesn't make much sense now that we don't query all urls
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
         }
         Action::YTUpload(video) => {
             println!("{}", yt()?.upload_video(video.clone())?.as_url());

@@ -18,6 +18,25 @@ pub fn build_cli() -> clap::App<'static, 'static> {
                 .help("State directory"),
         )
         .subcommand(
+            App::new("scrape-ektoplazm")
+                .about("get the list of all albums from ektoplazm.com")
+                .setting(clap::AppSettings::DisableVersion)
+                .arg(
+                    Arg::with_name("offset")
+                        .long("offset")
+                        .takes_value(true)
+                        .value_name("N")
+                        .help("Skip N albums (will be rounded)")
+                        .default_value("0"),
+                )
+                .arg(
+                    Arg::with_name("really")
+                        .long("really")
+                        .help("Really do a lot of HTTP requests?")
+                        .required(true),
+                ),
+        )
+        .subcommand(
             App::new("yt-upload")
                 .about("upload to YouTube")
                 .setting(clap::AppSettings::DisableVersion)
