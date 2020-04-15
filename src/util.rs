@@ -1,6 +1,8 @@
 use std::convert::From;
 use std::error;
 
+use google_youtube3 as youtube3;
+
 pub const USER_AGENT: &str = "ektoboat/1";
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -9,6 +11,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Error {
     msg: String,
     source: Option<Box<dyn error::Error + 'static>>,
+    retry_later: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -31,6 +34,7 @@ impl Error {
         Error {
             msg: msg.to_string(),
             source: None,
+            retry_later: false,
         }
     }
 
@@ -38,6 +42,7 @@ impl Error {
         Error {
             msg: msg.to_string(),
             source: Some(Box::new(source)),
+            retry_later: false,
         }
     }
 }
@@ -47,6 +52,7 @@ impl From<&str> for Error {
         Error {
             msg: msg.to_string(),
             source: None,
+            retry_later: false,
         }
     }
 }
@@ -81,9 +87,19 @@ impl From<id3::Error> for Error {
     }
 }
 
-impl From<google_youtube3::Error> for Error {
-    fn from(err: google_youtube3::Error) -> Self {
-        Error::wrap("YouTube error", err)
+impl From<youtube3::Error> for Error {
+    fn from(err: youtube3::Error) -> Self {
+        let mut retry = false;
+
+        if let youtube3::Error::BadRequest(youtube3::ErrorResponse { ref error }) = err {
+            if error.errors.iter().any(|e| e.reason == "quotaExceeded") {
+                retry = true;
+            }
+        }
+
+        let mut e = Error::wrap("YouTube error", err);
+        e.retry_later = retry;
+        e
     }
 }
 
@@ -103,4 +119,24 @@ impl From<regex::Error> for Error {
     fn from(err: regex::Error) -> Self {
         Error::wrap("Regex error", err)
     }
+}
+
+pub fn retry<T, F>(retries: u32, t: chrono::Duration, f: F) -> Result<T>
+where
+    F: Fn() -> Result<T>,
+{
+    let mut res = f();
+    for i in 0..retries {
+        match &res {
+            Err(e) if e.retry_later => {
+                log::debug!("Retriable error: {:?}", e);
+            },
+            _ => return res,
+        }
+
+        log::info!("Retriable error ({} retries left), sleeping {}s", retries - i,  t.num_seconds());
+        std::thread::sleep(t.to_std().expect("valid duration"));
+        res = f();
+    }
+    res
 }

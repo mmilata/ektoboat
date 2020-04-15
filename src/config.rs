@@ -222,6 +222,7 @@ pub fn run(config: Config) -> Result<(), util::Error> {
 }
 
 fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), util::Error> {
+    let yt_sleep_duration = chrono::Duration::hours(4);
     let blacklist = store.blacklist()?; // maybe don't init this every time in daemon
 
     log::info!("Processing {}", url);
@@ -300,7 +301,8 @@ fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), u
             tags: album.tags.clone(),
             filename: video_file,
         };
-        album.tracks[i].youtube_id = Some(yt.upload_video(args)?);
+        let yt_id = util::retry(8, yt_sleep_duration, || yt.upload_video(args.clone()))?;
+        album.tracks[i].youtube_id = Some(yt_id);
         store.save(&album)?;
     }
     //TODO: can delete videos here
@@ -316,7 +318,8 @@ fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), u
                 .map(|t| t.youtube_id.clone().expect("Video ID missing"))
                 .collect(),
         };
-        album.youtube_id = Some(yt.create_playlist(args)?);
+        let yt_id = util::retry(8, yt_sleep_duration, || yt.create_playlist(args.clone()))?;
+        album.youtube_id = Some(yt_id);
         store.save(&album)?;
     }
 
