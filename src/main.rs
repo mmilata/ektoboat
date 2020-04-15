@@ -3,7 +3,7 @@ extern crate stderrlog;
 
 use std::process;
 
-use ektoboat::{run, Config};
+use ektoboat::Config;
 
 fn init_logging(config: &Config) {
     stderrlog::new()
@@ -21,7 +21,7 @@ fn main() {
 
     init_logging(&config);
 
-    if let Err(e) = run(config) {
+    if let Err(e) = config.run() {
         log::error!("Error: {}", e);
         process::exit(1);
     }

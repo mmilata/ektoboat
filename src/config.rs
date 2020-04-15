@@ -1,7 +1,7 @@
-use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::cli;
+use crate::flow;
 use crate::source;
 use crate::store;
 use crate::util;
@@ -107,9 +107,9 @@ impl Config {
         config
     }
 
-    fn filename(self: &Config, basename: &str) -> PathBuf {
+    pub fn filename(self: &Config, basename: &str) -> PathBuf {
         let mut p = self.appdir.clone();
-        mkdir_if_not_exists(&p);
+        util::mkdir_if_not_exists(&p);
         p.push(basename);
         p
     }
@@ -125,15 +125,86 @@ impl Config {
     pub fn mp3_dir(&self) -> PathBuf {
         // TODO ~/.cache/ektoboat/mp3
         let dir = self.filename("mp3");
-        mkdir_if_not_exists(&dir);
+        util::mkdir_if_not_exists(&dir);
         dir
     }
 
     pub fn video_dir(&self) -> PathBuf {
         // TODO ~/.cache/ektoboat/video
         let dir = self.filename("video");
-        mkdir_if_not_exists(&dir);
+        util::mkdir_if_not_exists(&dir);
         dir
+    }
+
+    pub fn run(self) -> Result<(), util::Error> {
+        let yt = || {
+            youtube::YT::new(
+                self.client_secret().as_path(),
+                self.filename("youtube_token.json").as_path(),
+            )
+        };
+        match &self.action {
+            Action::Help => {
+                // FIXME use different error type
+                return Err(util::Error::new(
+                    "You have to specify an action, use --help for help",
+                ));
+            }
+            Action::Scrape(off) => {
+                let mut store = store::Store::open(&self.db_path())?;
+
+                for (i, x) in source::EktoplazmScraper::from_offset(*off).enumerate() {
+                    // let (url, tracks, zipbytes) = x?;
+                    // println!("{} {}\t{}\t{}", (i as u32)+off, tracks, zipbytes, url);
+                    let url = x?;
+                    println!("{} {}", (i as u32) + off, url);
+                    store.queue_insert(&url)?;
+                    // doesn't make much sense now that we don't query all urls
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                }
+            }
+            Action::YTUpload(video) => {
+                println!("{}", yt()?.upload_video(video.clone())?.as_url());
+            }
+            Action::YTPlaylist(playlist) => {
+                let yt = yt()?;
+                let playlist_id = yt.create_playlist(playlist.clone())?;
+                println!("{}", playlist_id.as_url());
+            }
+            Action::Fetch(url) => {
+                let mut store = store::Store::open(&self.db_path())?;
+                let album = source::fetch(url, &self.mp3_dir())?;
+                store.save(&album)?;
+            }
+            Action::Video {
+                input,
+                image,
+                output,
+            } => {
+                video::convert_file(input, image, output)?;
+                println!("{:?}", output.canonicalize()?);
+            }
+            Action::URL(url) => {
+                let mut store = store::Store::open(&self.db_path())?;
+                flow::run_url(url, &self, &mut store)?;
+            }
+            Action::Status(url) => {
+                let mut store = store::Store::open(&self.db_path())?;
+                match store.get_album(url)? {
+                    None => {
+                        println!("Not in database");
+                    }
+                    Some(album) => {
+                        album.print();
+                        println!("");
+                        println!("Has all mp3s:   {:?}", album.has_mp3(&self.mp3_dir()));
+                        println!("Has all videos: {:?}", album.has_video(&self.video_dir()));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -150,185 +221,3 @@ impl Default for Config {
     }
 }
 
-pub fn run(config: Config) -> Result<(), util::Error> {
-    let yt = || {
-        youtube::YT::new(
-            config.client_secret().as_path(),
-            config.filename("youtube_token.json").as_path(),
-        )
-    };
-    match &config.action {
-        Action::Help => {
-            // FIXME use different error type
-            return Err(util::Error::new(
-                "You have to specify an action, use --help for help",
-            ));
-        }
-        Action::Scrape(off) => {
-            let mut store = store::Store::open(&config.db_path())?;
-
-            for (i, x) in source::EktoplazmScraper::from_offset(*off).enumerate() {
-                // let (url, tracks, zipbytes) = x?;
-                // println!("{} {}\t{}\t{}", (i as u32)+off, tracks, zipbytes, url);
-                let url = x?;
-                println!("{} {}", (i as u32) + off, url);
-                store.queue_insert(&url)?;
-                // doesn't make much sense now that we don't query all urls
-                std::thread::sleep(std::time::Duration::from_millis(1000));
-            }
-        }
-        Action::YTUpload(video) => {
-            println!("{}", yt()?.upload_video(video.clone())?.as_url());
-        }
-        Action::YTPlaylist(playlist) => {
-            let yt = yt()?;
-            let playlist_id = yt.create_playlist(playlist.clone())?;
-            println!("{}", playlist_id.as_url());
-        }
-        Action::Fetch(url) => {
-            let mut store = store::Store::open(&config.db_path())?;
-            let album = source::fetch(url, &config.mp3_dir())?;
-            store.save(&album)?;
-        }
-        Action::Video {
-            input,
-            image,
-            output,
-        } => {
-            video::convert_file(input, image, output)?;
-            println!("{:?}", output.canonicalize()?);
-        }
-        Action::URL(url) => {
-            let mut store = store::Store::open(&config.db_path())?;
-            run_url(url, &config, &mut store)?;
-        }
-        Action::Status(url) => {
-            let mut store = store::Store::open(&config.db_path())?;
-            match store.get_album(url)? {
-                None => {
-                    println!("Not in database");
-                }
-                Some(album) => {
-                    album.print();
-                    println!("");
-                    println!("Has all mp3s:   {:?}", album.has_mp3(&config.mp3_dir()));
-                    println!("Has all videos: {:?}", album.has_video(&config.video_dir()));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn run_url(url: &str, config: &Config, store: &mut store::Store) -> Result<(), util::Error> {
-    let yt_sleep_duration = chrono::Duration::hours(4);
-    let blacklist = store.blacklist()?; // maybe don't init this every time in daemon
-
-    log::info!("Processing {}", url);
-    let mut album = match store.get_album(url)? {
-        None => source::fetch(url, &config.mp3_dir())?,
-        Some(album) => {
-            if album.has_mp3(&config.mp3_dir()) {
-                album
-            } else {
-                log::warn!("Album has missing audio files, re-fetching");
-                source::fetch(url, &config.mp3_dir())?
-            }
-        }
-    };
-    store.save(&album)?;
-
-    /*
-    if album.license.is_none() {
-        return Err(util::Error::new("Album has no license"));
-    }
-    */
-    if blacklist.matches(&album) {
-        return Err(util::Error::new("Album blacklisted"));
-    }
-
-    let album_video_dir = album.dirname(&config.video_dir());
-    if !album.has_video(&config.video_dir()) {
-        let cover_img = video::find_cover(&album.dirname(&config.mp3_dir()))?;
-        let album_mp3_dir = album.dirname(&config.mp3_dir());
-        mkdir_if_not_exists(&album_video_dir);
-
-        for mut tr in &mut album.tracks {
-            let basename = tr.mp3_file.as_ref().ok_or("MP3 file missing")?;
-            let mut mp3_file = album_mp3_dir.clone();
-            mp3_file.push(basename);
-
-            let mut video_file = album_video_dir.clone();
-            let basename = basename.with_extension("avi");
-            video_file.push(basename.clone());
-
-            video::convert_file(&mp3_file, &cover_img, &video_file)?;
-
-            tr.video_file = Some(basename);
-        }
-        store.save(&album)?;
-    }
-    //TODO: can delete mp3s here
-
-    let yt = youtube::YT::new(
-        config.client_secret().as_path(),
-        config.filename("youtube_token.json").as_path(),
-    )?;
-    // generate descriptions first, can't use reference to album inside the for loop
-    let descriptions = album
-        .tracks
-        .iter()
-        .map(|t| source::description(&album, t))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    for (i, desc) in descriptions.into_iter().enumerate() {
-        let tr = album.tracks[i].clone();
-        if let Some(yt_id) = &tr.youtube_id {
-            log::debug!(
-                "Track {} already has youtube id {}",
-                tr.title,
-                yt_id.as_url()
-            );
-            continue;
-        }
-
-        let mut video_file = album_video_dir.clone();
-        video_file.push(tr.video_file.as_ref().ok_or("Video file missing")?);
-        let args = youtube::Video {
-            title: format!("{} - {}", tr.artist, tr.title),
-            description: desc,
-            tags: album.tags.clone(),
-            filename: video_file,
-        };
-        let yt_id = util::retry(8, yt_sleep_duration, || yt.upload_video(args.clone()))?;
-        album.tracks[i].youtube_id = Some(yt_id);
-        store.save(&album)?;
-    }
-    //TODO: can delete videos here
-
-    if album.youtube_id.is_none() && album.tracks.iter().all(|t| t.youtube_id.is_some()) {
-        let args = youtube::Playlist {
-            title: youtube::playlist_title(&album.title, &album.artist, &album.year, &album.tags),
-            description: String::new(), // the description is not really visible
-            tags: album.tags.clone(),
-            videos: album
-                .tracks
-                .iter()
-                .map(|t| t.youtube_id.clone().expect("Video ID missing"))
-                .collect(),
-        };
-        let yt_id = util::retry(8, yt_sleep_duration, || yt.create_playlist(args.clone()))?;
-        album.youtube_id = Some(yt_id);
-        store.save(&album)?;
-    }
-
-    Ok(())
-}
-
-fn mkdir_if_not_exists(p: &Path) {
-    if !p.exists() {
-        log::info!("Creating directory {:?}", p);
-        std::fs::DirBuilder::new().mode(0o770).create(&p).unwrap();
-    }
-}

@@ -1,9 +1,18 @@
 use std::convert::From;
 use std::error;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::Path;
 
 use google_youtube3 as youtube3;
 
 pub const USER_AGENT: &str = "ektoboat/1";
+
+pub fn mkdir_if_not_exists(p: &Path) {
+    if !p.exists() {
+        log::info!("Creating directory {:?}", p);
+        std::fs::DirBuilder::new().mode(0o770).create(&p).unwrap();
+    }
+}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
