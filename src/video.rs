@@ -53,6 +53,21 @@ fn find_cover_vec(mut fnames: Vec<String>) -> Result<String, util::Error> {
     Err(util::Error::new("No cover image found"))
 }
 
+fn temp_video_file(final_file: &Path) -> util::Result<PathBuf> {
+    let mut res = final_file.to_path_buf();
+    let mut fname = String::from(
+        res.file_name()
+            .ok_or("Bad video file name")?
+            .to_string_lossy(),
+    );
+    // ffmpeg cares about extensions -> add prefix
+    fname.insert_str(0, "TEMP ");
+    res.pop();
+    res.push(fname);
+
+    Ok(res)
+}
+
 pub fn convert_file(
     audio_file: &Path,
     image_file: &Path,
@@ -60,10 +75,11 @@ pub fn convert_file(
 ) -> Result<(), util::Error> {
     log::info!("Converting {:?}", audio_file);
 
+    let temp_file = temp_video_file(out_file)?;
+
     #[rustfmt::skip]
     let output = process::Command::new("ffmpeg")
         .arg("-loglevel").arg("error")
-        .arg("-n")
         .arg("-loop").arg("1")
         .arg("-i").arg(image_file)
         .arg("-i").arg(audio_file)
@@ -71,7 +87,7 @@ pub fn convert_file(
         .arg("-r").arg("1")
         .arg("-acodec").arg("copy")
         .arg("-shortest")
-        .arg(out_file)
+        .arg(&temp_file)
         .output()?;
 
     if !output.status.success() {
@@ -80,6 +96,8 @@ pub fn convert_file(
         log::error!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         return Err(util::Error::new("ffmpeg failed"));
     }
+
+    std::fs::rename(temp_file, out_file)?;
 
     Ok(())
 }
@@ -188,5 +206,16 @@ mod tests {
                 find_cover_vec(tc.1.iter().map(|x| x.to_string()).collect()).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn temp_video() {
+        assert_eq!(
+            temp_video_file(&PathBuf::from(
+                "/var/lib/ektoboat whatevs/videos/01 - foo - bar.avi"
+            ))
+            .unwrap(),
+            PathBuf::from("/var/lib/ektoboat whatevs/videos/TEMP 01 - foo - bar.avi")
+        );
     }
 }
