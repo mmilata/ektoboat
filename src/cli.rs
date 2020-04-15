@@ -132,6 +132,11 @@ pub fn build_cli() -> clap::App<'static, 'static> {
                 .arg(Arg::with_name("url").index(1).required(true)),
         )
         .subcommand(
+            App::new("daemon")
+                .about("process URLs from database")
+                .setting(clap::AppSettings::DisableVersion),
+        )
+        .subcommand(
             App::new("status")
                 .about("show URL status")
                 .setting(clap::AppSettings::DisableVersion)

@@ -20,6 +20,7 @@ pub enum Action {
         output: PathBuf,
     },
     URL(String),
+    Daemon,
     Status(String),
 }
 
@@ -27,13 +28,11 @@ pub struct Config {
     pub verbose: usize,
     pub appdir: PathBuf,
     pub action: Action,
-    // yt credentials
-    // path to db // or handle?
 }
 
 impl Config {
-    // XXX logging is not set up at this point
     pub fn from_cmdline() -> Config {
+        // XXX logging is not set up at this point
         let mut config = Config::default();
         let matches = cli::build_cli().get_matches();
 
@@ -100,6 +99,9 @@ impl Config {
         if let Some(ref url_matches) = matches.subcommand_matches("url") {
             config.action = Action::URL(url_matches.value_of("url").unwrap().to_string());
         }
+        if let Some(_) = matches.subcommand_matches("daemon") {
+            config.action = Action::Daemon;
+        }
         if let Some(ref status_matches) = matches.subcommand_matches("status") {
             config.action = Action::Status(status_matches.value_of("url").unwrap().to_string());
         }
@@ -136,45 +138,47 @@ impl Config {
         dir
     }
 
-    pub fn run(self) -> Result<(), util::Error> {
-        let yt = || {
-            youtube::YT::new(
-                self.client_secret().as_path(),
-                self.filename("youtube_token.json").as_path(),
-            )
-        };
+    // TODO: maybe make this lazy?
+    fn yt(&self) -> util::Result<youtube::YT> {
+        youtube::YT::new(
+            self.client_secret().as_path(),
+            self.filename("youtube_token.json").as_path(),
+        )
+    }
+
+    fn store(&self) -> util::Result<store::Store> {
+        store::Store::open(&self.db_path())
+    }
+
+    pub fn run(self) -> util::Result<()> {
         match &self.action {
             Action::Help => {
-                // FIXME use different error type
                 return Err(util::Error::new(
                     "You have to specify an action, use --help for help",
                 ));
             }
             Action::Scrape(off) => {
-                let mut store = store::Store::open(&self.db_path())?;
-
                 for (i, x) in source::EktoplazmScraper::from_offset(*off).enumerate() {
                     // let (url, tracks, zipbytes) = x?;
                     // println!("{} {}\t{}\t{}", (i as u32)+off, tracks, zipbytes, url);
                     let url = x?;
                     println!("{} {}", (i as u32) + off, url);
-                    store.queue_insert(&url)?;
+                    self.store()?.queue_insert(&url)?;
                     // doesn't make much sense now that we don't query all urls
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                 }
             }
             Action::YTUpload(video) => {
-                println!("{}", yt()?.upload_video(video.clone())?.as_url());
+                println!("{}", self.yt()?.upload_video(video.clone())?.as_url());
             }
             Action::YTPlaylist(playlist) => {
-                let yt = yt()?;
+                let yt = self.yt()?;
                 let playlist_id = yt.create_playlist(playlist.clone())?;
                 println!("{}", playlist_id.as_url());
             }
             Action::Fetch(url) => {
-                let mut store = store::Store::open(&self.db_path())?;
                 let album = source::fetch(url, &self.mp3_dir())?;
-                store.save(&album)?;
+                self.store()?.save(&album)?;
             }
             Action::Video {
                 input,
@@ -185,23 +189,22 @@ impl Config {
                 println!("{:?}", output.canonicalize()?);
             }
             Action::URL(url) => {
-                let mut store = store::Store::open(&self.db_path())?;
-                flow::run_url(url, &self, &mut store)?;
+                flow::run_url(&self, &mut self.store()?, &self.yt()?, url)?;
             }
-            Action::Status(url) => {
-                let mut store = store::Store::open(&self.db_path())?;
-                match store.get_album(url)? {
-                    None => {
-                        println!("Not in database");
-                    }
-                    Some(album) => {
-                        album.print();
-                        println!("");
-                        println!("Has all mp3s:   {:?}", album.has_mp3(&self.mp3_dir()));
-                        println!("Has all videos: {:?}", album.has_video(&self.video_dir()));
-                    }
+            Action::Daemon => {
+                flow::daemon(&self, &mut self.store()?, &self.yt()?)?;
+            }
+            Action::Status(url) => match self.store()?.get_album(url)? {
+                None => {
+                    println!("Not in database");
                 }
-            }
+                Some(album) => {
+                    album.print();
+                    println!("");
+                    println!("Has all mp3s:   {:?}", album.has_mp3(&self.mp3_dir()));
+                    println!("Has all videos: {:?}", album.has_video(&self.video_dir()));
+                }
+            },
         }
 
         Ok(())
@@ -220,4 +223,3 @@ impl Default for Config {
         }
     }
 }
-

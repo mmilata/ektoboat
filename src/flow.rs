@@ -5,7 +5,12 @@ use crate::util;
 use crate::video;
 use crate::youtube;
 
-pub fn run_url(url: &str, config: &config::Config, store: &mut store::Store) -> Result<(), util::Error> {
+pub fn run_url(
+    config: &config::Config,
+    store: &mut store::Store,
+    yt: &youtube::YT,
+    url: &str,
+) -> util::Result<()> {
     let yt_sleep_duration = chrono::Duration::hours(4);
     let blacklist = store.blacklist()?; // maybe don't init this every time in daemon
 
@@ -55,10 +60,6 @@ pub fn run_url(url: &str, config: &config::Config, store: &mut store::Store) -> 
     }
     //TODO: can delete mp3s here
 
-    let yt = youtube::YT::new(
-        config.client_secret().as_path(),
-        config.filename("youtube_token.json").as_path(),
-    )?;
     // generate descriptions first, can't use reference to album inside the for loop
     let descriptions = album
         .tracks
@@ -110,3 +111,28 @@ pub fn run_url(url: &str, config: &config::Config, store: &mut store::Store) -> 
     Ok(())
 }
 
+pub fn daemon(
+    config: &config::Config,
+    store: &mut store::Store,
+    yt: &youtube::YT,
+) -> util::Result<()> {
+    loop {
+        let (act, url) = match store.queue_get()? {
+            None => {
+                log::error!("No more work!");
+                return Ok(());
+            }
+            Some((act, url)) if act == "url" => (act, url),
+            Some((act, _)) => {
+                return Err(util::Error::new(&format!("Unknown action {}", act)));
+            }
+        };
+        let res = run_url(config, store, yt, &url);
+        let status = match res {
+            Err(e) => e.to_string(),
+            Ok(()) => "OK".to_string(),
+        };
+        store.queue_result(act, url, status)?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}

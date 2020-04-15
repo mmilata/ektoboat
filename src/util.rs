@@ -139,11 +139,15 @@ where
         match &res {
             Err(e) if e.retry_later => {
                 log::debug!("Retriable error: {:?}", e);
-            },
+            }
             _ => return res,
         }
 
-        log::info!("Retriable error ({} retries left), sleeping {}s", retries - i,  t.num_seconds());
+        log::info!(
+            "Retriable error ({} retries left), sleeping {}s",
+            retries - i,
+            t.num_seconds()
+        );
         std::thread::sleep(t.to_std().expect("valid duration"));
         res = f();
     }
