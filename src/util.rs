@@ -8,7 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Error {
     msg: String,
-    source: Option<Box<dyn error::Error>>,
+    source: Option<Box<dyn error::Error + 'static>>,
 }
 
 impl std::fmt::Display for Error {
@@ -33,6 +33,13 @@ impl Error {
             source: None,
         }
     }
+
+    fn wrap<T: std::error::Error + 'static>(msg: &str, source: T) -> Error {
+        Error {
+            msg: msg.to_string(),
+            source: Some(Box::new(source)),
+        }
+    }
 }
 
 impl From<&str> for Error {
@@ -46,82 +53,54 @@ impl From<&str> for Error {
 
 impl From<hyper::Error> for Error {
     fn from(err: hyper::Error) -> Self {
-        Error {
-            msg: "HTTP error".to_string(),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("HTTP error", err)
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Error {
-            msg: "IO error".to_string(),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("IO error", err)
     }
 }
 
 impl From<std::fmt::Error> for Error {
     fn from(err: std::fmt::Error) -> Self {
-        Error {
-            msg: "Formatting error".to_string(),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("Formatting error", err)
     }
 }
 
 impl From<zip::result::ZipError> for Error {
     fn from(err: zip::result::ZipError) -> Self {
-        Error {
-            msg: "Error extracting ZIP file".to_string(),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("Error extracting ZIP file", err)
     }
 }
 
 impl From<id3::Error> for Error {
     fn from(err: id3::Error) -> Self {
-        Error {
-            //msg: "Error reading ID3 tag".to_string(),
-            msg: format!("Error reading ID3 tag: {}", err),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("Error reading ID3 tag", err)
     }
 }
 
 impl From<google_youtube3::Error> for Error {
     fn from(err: google_youtube3::Error) -> Self {
-        Error {
-            msg: format!("YouTube error: {}", err),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("YouTube error", err)
     }
 }
 
 impl From<serde_json::error::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
-        Error {
-            msg: format!("JSON error: {}", err),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("JSON error", err)
     }
 }
 
 impl From<rusqlite::Error> for Error {
     fn from(err: rusqlite::Error) -> Self {
-        Error {
-            msg: format!("SQLite error: {}", err),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("SQLite error", err)
     }
 }
 
 impl From<regex::Error> for Error {
     fn from(err: regex::Error) -> Self {
-        Error {
-            msg: format!("Regex error: {}", err),
-            source: Some(Box::new(err)),
-        }
+        Error::wrap("Regex error", err)
     }
 }
