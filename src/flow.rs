@@ -21,20 +21,20 @@ pub fn run_url(
             if album.has_mp3(&config.mp3_dir()) {
                 album
             } else {
+                // FIXME deletes yt ids!
                 log::warn!("Album has missing audio files, re-fetching");
-                source::fetch(url, &config.mp3_dir())?
+                return Err(util::Error::new("Refetching overwrites YT ids, FIXME!"));
+                // source::fetch(url, &config.mp3_dir())?
             }
         }
     };
     store.save(&album)?;
 
-    /*
     if album.license.is_none() {
-        return Err(util::Error::new("Album has no license"));
+        return Err(util::Error::new("No license"));
     }
-    */
     if blacklist.matches(&album) {
-        return Err(util::Error::new("Album blacklisted"));
+        return Err(util::Error::new("Blacklisted"));
     }
 
     let album_video_dir = album.dirname(&config.video_dir());
@@ -108,6 +108,13 @@ pub fn run_url(
         store.save(&album)?;
     }
 
+    log::info!(
+        "Success - {} - {}",
+        url,
+        album
+            .youtube_id
+            .map_or("(no playlist id)".to_string(), |y| y.to_string())
+    );
     Ok(())
 }
 
@@ -129,7 +136,10 @@ pub fn daemon(
         };
         let res = run_url(config, store, yt, &url);
         let status = match res {
-            Err(e) => e.to_string(),
+            Err(e) => {
+                log::error!("Processing {} failed: {}", url, e);
+                e.to_string()
+            }
             Ok(()) => "OK".to_string(),
         };
         store.queue_result(act, url, status)?;
