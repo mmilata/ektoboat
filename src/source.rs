@@ -247,7 +247,10 @@ fn ektoplazm_parse<T: Read>(
             tag.attr("href")
                 .map_or(false, |target| target.contains("creativecommons"))
         })
-        .filter(|tag| tag.text().contains("license") || tag.text().contains("licence"))
+        .filter(|tag| {
+            let lower = tag.text().to_lowercase();
+            lower.contains("license") || lower.contains("licence") || lower.contains("commons")
+        })
         .filter_map(|tag| tag.attr("href"))
         .next()
         .map(|x| x.to_string());
@@ -411,6 +414,14 @@ mod tests {
                 vec!["Anomalistic Records", "Splatterkore Reck-ords"],
                 vec!["Experimental", "Psycore"],
                 8,
+            ),
+            (
+                "ektoplazm-license.html",
+                "https://ektoplazm.com/files/Ekoplex%20-%20Enter%20The%20Dragon%20EP%20-%202008%20-%20MP3.zip",
+                Some("https://creativecommons.org/licenses/by-nc-nd/2.5/ca/"),
+                vec!["Ektoplazm"],
+                vec!["Full-On"],
+                3,
             ),
         ];
 
