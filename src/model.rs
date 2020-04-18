@@ -35,13 +35,14 @@ pub struct Album {
 impl Album {
     pub fn dirname(&self, base_dir: &Path) -> PathBuf {
         let mut res = PathBuf::from(base_dir);
+        let clean = |s: &str| s.replace(" ", "_").replace("/", "_");
 
         let mut comp = match &self.artist {
             None => "VA".to_string(),
-            Some(a) => a.replace(" ", "_"),
+            Some(a) => clean(a),
         };
         comp.push_str("_-_");
-        comp.push_str(&self.title.replace(" ", "_"));
+        comp.push_str(&clean(&self.title));
 
         res.push(comp);
         res
