@@ -34,7 +34,7 @@ impl std::fmt::Display for Error {
 
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None //FIXME
+        self.source.as_ref().map(|s| &**s)
     }
 }
 
